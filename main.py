@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import datetime  # 📌 إضافة جديدة للتاريخ والوقت
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import (
@@ -12,11 +12,8 @@ from telegram.ext import (
 )
 
 TOKEN = os.getenv("BOT_TOKEN")
-
-# 📌 جلب معرف قناة اللوجات من متغيرات البيئة (ضعه في Railway)
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
-# تخزين المخالفات
 warnings_db = {}
 
 LINK_PATTERN = re.compile(
@@ -25,17 +22,12 @@ LINK_PATTERN = re.compile(
 )
 
 
-# 📌 دالة إرسال التقرير إلى قناة المشرفين (جديدة)
 async def send_log(bot, user, chat_title, deleted_text):
-    """
-    ترسل تقريراً مفصلاً إلى قناة اللوجات الخاصة
-    """
-    if not LOG_CHANNEL_ID:  # إذا لم يُحدد المعرف، لا تفعل شيئاً
+    if not LOG_CHANNEL_ID:
+        print("⚠️ LOG_CHANNEL_ID غير مضبوط")
         return
 
-    # تنسيق الوقت (مثال: 03:45 PM - 21/06/2026)
     time_now = datetime.now().strftime("%I:%M %p - %d/%m/%Y")
-
     log_message = (
         f"🕒 {time_now}\n"
         f"🚫 <b>تم حذف رابط مخالف</b>\n"
@@ -46,27 +38,35 @@ async def send_log(bot, user, chat_title, deleted_text):
     )
 
     try:
-        await bot.send_message(
-            chat_id=LOG_CHANNEL_ID,
-            text=log_message,
-            parse_mode="HTML"
-        )
+        await bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_message, parse_mode="HTML")
+        print("✅ تم إرسال اللوج بنجاح")
     except Exception as e:
-        print(f"⚠️ فشل إرسال اللوج: {e}")
+        print(f"❌ فشل إرسال اللوج: {type(e).__name__} - {e}")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🛡️ Raskov Security Bot يعمل بنجاح."
-    )
+    await update.message.reply_text("🛡️ Raskov Security Bot يعمل بنجاح.")
 
 
 async def warnings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     count = warnings_db.get(user_id, 0)
-    await update.message.reply_text(
-        f"⚠️ عدد مخالفاتك: {count}/3"
-    )
+    await update.message.reply_text(f"⚠️ عدد مخالفاتك: {count}/3")
+
+
+async def test_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أمر لاختبار الإرسال إلى القناة"""
+    if not LOG_CHANNEL_ID:
+        await update.message.reply_text("❌ LOG_CHANNEL_ID غير مضبوط.")
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text="🧪 رسالة اختبار من البوت - إذا وصلتك فهذا يعني أن الإعدادات صحيحة."
+        )
+        await update.message.reply_text("✅ تم الإرسال إلى القناة بنجاح.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ فشل الإرسال: {type(e).__name__} - {e}")
 
 
 async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -77,7 +77,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_title = update.effective_chat.title or "المجموعة"
 
-    # التحقق من صلاحيات المشرف
     try:
         member = await context.bot.get_chat_member(chat_id, user_id)
         if member.status in ["administrator", "creator"]:
@@ -88,14 +87,13 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     if LINK_PATTERN.search(text):
-        # 1. حذف الرسالة
         try:
             await update.message.delete()
         except Exception as e:
             print(f"Delete error: {e}")
             return
 
-        # 2. 📌 إرسال التقرير إلى قناة اللوجات (الإضافة الجديدة)
+        # إرسال اللوج
         await send_log(
             bot=context.bot,
             user=update.effective_user,
@@ -103,13 +101,11 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             deleted_text=text
         )
 
-        # 3. تحديث المخالفات
         warnings_db[user_id] = warnings_db.get(user_id, 0) + 1
         count = warnings_db[user_id]
 
         print(f"LINK DELETED | User={user_id} | Chat={chat_id} | Warnings={count}")
 
-        # 4. إرسال تحذير أو حظر
         if count == 1:
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -125,17 +121,17 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"🚫 تم حظر {update.effective_user.first_name} تلقائياً بسبب تكرار نشر الروابط."
+                    text=f"🚫 تم حظر {update.effective_user.first_name} تلقائياً."
                 )
             except Exception as e:
                 print(f"Ban error: {e}")
 
 
-# ----- تشغيل البوت -----
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("warnings", warnings))
+app.add_handler(CommandHandler("testlog", test_log))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, anti_link))
 
 app.run_polling()

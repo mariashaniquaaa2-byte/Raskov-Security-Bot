@@ -14,49 +14,47 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
-# 📌 قائمة الروابط المسموحة فقط (خاص بمجتمع Pi)
+# 📌 قائمة الروابط المسموحة (خاص بـ Pi)
 ALLOWED_DOMAINS = [
     "minepi.com",
     "pi.app",
 ]
 
-# 📌 أنماط الكشف (Regex)
+# 📌 الأنماط (محسّنة)
 LINK_PATTERN = re.compile(
     r"(https?://|www\.|t\.me/|telegram\.me/|[a-zA-Z0-9-]+\.(com|net|org|io|app|xyz|me|co))",
     re.IGNORECASE
 )
 
-# نمط رقم الهاتف (يدعم معظم الصيغ)
-PHONE_PATTERN = re.compile(
-    r"(\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,5}[-.\s]?\d{1,5})"
-)
-
-# نمط محفظة إيثيريوم / BSC (تبدأ بـ 0x وتليها 40 حرفاً)
+# 🔥 نمط المحفظة (الأولوية القصوى) - يبحث عن 0x + 40 حرفاً
 WALLET_PATTERN = re.compile(
-    r"(0x[a-fA-F0-9]{40})"
+    r"\b(0x[a-fA-F0-9]{40})\b",
+    re.IGNORECASE
 )
 
-# تخزين المخالفات
+# 🔥 نمط رقم الهاتف (محسّن) - فقط أرقام، من 7 إلى 15 رقماً، مع + اختياري
+# يتجنب التقاط 0x... لأن x ليس رقماً
+PHONE_PATTERN = re.compile(
+    r"(?<![a-zA-Z])(\+?\d{7,15})(?![a-zA-Z])"
+)
+
+# تخزين المخالفات (ملاحظة: سيتم مسحها عند إعادة تشغيل البوت)
 warnings_db = {}
 
 
 async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط"):
-    """
-    إرسال تقرير إلى قناة المشرفين مع نوع المخالفة
-    """
     if not LOG_CHANNEL_ID:
         print("⚠️ LOG_CHANNEL_ID غير مضبوط")
         return
 
     time_now = datetime.now().strftime("%I:%M %p - %d/%m/%Y")
     
-    # اختيار الإيموجي حسب نوع المخالفة
-    if violation_type == "رقم هاتف":
-        emoji = "📞"
-    elif violation_type == "محفظة رقمية":
-        emoji = "💰"
-    else:
-        emoji = "🚫"
+    emoji_map = {
+        "رابط غير مسموح": "🚫",
+        "رقم هاتف": "📞",
+        "محفظة رقمية": "💰",
+    }
+    emoji = emoji_map.get(violation_type, "⚠️")
 
     log_message = (
         f"🕒 {time_now}\n"
@@ -88,7 +86,6 @@ async def warnings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def test_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """أمر لاختبار الإرسال إلى القناة"""
     if not LOG_CHANNEL_ID:
         await update.message.reply_text("❌ LOG_CHANNEL_ID غير مضبوط.")
         return
@@ -111,7 +108,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_title = update.effective_chat.title or "المجموعة"
     text = update.message.text
 
-    # 1. التحقق من صلاحيات المشرف (تجاوز الفلتر)
+    # 1. التحقق من المشرفين (تجاوز الفلتر)
     try:
         member = await context.bot.get_chat_member(chat_id, user_id)
         if member.status in ["administrator", "creator"]:
@@ -119,35 +116,34 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Admin check error: {e}")
 
-    # 2. متغيرات لتحديد المخالفة
+    # 2. تحديد المخالفة (مع الأولويات)
     is_violation = False
-    violation_type = "رابط"
+    violation_type = "رابط غير مسموح"
     matched_text = text
 
-    # ----- التحقق من الرابط (مع القائمة البيضاء) -----
-    if LINK_PATTERN.search(text):
-        # نفحص هل الرابط ضمن القائمة المسموحة؟
+    # 🔥 الأولوية 1: المحفظة الرقمية (تتحقق أولاً)
+    if WALLET_PATTERN.search(text):
+        is_violation = True
+        violation_type = "محفظة رقمية"
+
+    # 🔥 الأولوية 2: رقم الهاتف (إذا لم تكن محفظة)
+    elif not is_violation and PHONE_PATTERN.search(text):
+        is_violation = True
+        violation_type = "رقم هاتف"
+
+    # 🔥 الأولوية 3: الرابط (إذا لم يكن محظوراً بالأعلى)
+    if not is_violation and LINK_PATTERN.search(text):
+        # نفحص القائمة البيضاء
         is_allowed = False
         for domain in ALLOWED_DOMAINS:
             if domain in text.lower():
                 is_allowed = True
                 break
-        
         if not is_allowed:
             is_violation = True
             violation_type = "رابط غير مسموح"
 
-    # ----- التحقق من رقم الهاتف -----
-    if not is_violation and PHONE_PATTERN.search(text):
-        is_violation = True
-        violation_type = "رقم هاتف"
-
-    # ----- التحقق من المحفظة الرقمية -----
-    if not is_violation and WALLET_PATTERN.search(text):
-        is_violation = True
-        violation_type = "محفظة رقمية"
-
-    # 3. إذا كانت مخالفة، قم بالمعالجة
+    # 3. معالجة المخالفة
     if is_violation:
         # حذف الرسالة
         try:
@@ -156,7 +152,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Delete error: {e}")
             return
 
-        # إرسال التقرير إلى قناة اللوجات (مع نوع المخالفة)
+        # إرسال التقرير إلى القناة
         await send_log(
             bot=context.bot,
             user=update.effective_user,
@@ -165,11 +161,11 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             violation_type=violation_type
         )
 
-        # تحديث عدد المخالفات
+        # تحديث المخالفات
         warnings_db[user_id] = warnings_db.get(user_id, 0) + 1
         count = warnings_db[user_id]
 
-        print(f"VIOLATION | User={user_id} | Chat={chat_id} | Type={violation_type} | Warnings={count}")
+        print(f"VIOLATION | User={user_id} | Type={violation_type} | Count={count}")
 
         # إرسال تحذير أو حظر
         if count == 1:
@@ -184,13 +180,25 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         elif count >= 3:
             try:
+                # محاولة الحظر
                 await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=f"🚫 تم حظر {update.effective_user.first_name} تلقائياً بسبب تكرار المخالفات."
+                    text=f"🚫 تم حظر {update.effective_user.first_name} تلقائياً بسبب تكرار المخالفات (3/3)."
                 )
+                print(f"✅ تم حظر المستخدم {user_id} بنجاح")
             except Exception as e:
-                print(f"Ban error: {e}")
+                # 🔥 رسالة خطأ واضحة في السجلات
+                error_msg = f"❌ فشل الحظر: {type(e).__name__} - {e}"
+                print(error_msg)
+                # إرسال تنبيه للمشرفين في قناة اللوجات
+                await send_log(
+                    bot=context.bot,
+                    user=update.effective_user,
+                    chat_title=chat_title,
+                    deleted_text=f"فشل حظر المستخدم بسبب: {e}\nتأكد من أن البوت Admin ولديه صلاحية الحظر.",
+                    violation_type="⚠️ خطأ في الصلاحيات"
+                )
 
 
 def main():

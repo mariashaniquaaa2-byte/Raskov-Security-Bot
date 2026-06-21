@@ -1,7 +1,6 @@
 import os
 import re
 import random
-import telegram
 from datetime import datetime, timedelta
 
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
@@ -55,12 +54,8 @@ LINK_PATTERN = re.compile(
 )
 WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40})\b", re.IGNORECASE)
 
-# ===================== دوال الكشف =====================
-
-def contains_phone_number(text: str) -> bool:
-    """التحقق من وجود رقم هاتف (7-15 رقماً متتالياً)"""
-    cleaned = re.sub(r'[\s\-\(\)\+]', '', text)
-    return bool(re.search(r'\d{7,15}', cleaned))
+# نمط رقم الهاتف (يلتقط الأرقام المكونة من 7 إلى 15 رقماً، مع أو بدون +)
+PHONE_PATTERN = re.compile(r"(\+?\d{7,15})")
 
 # ===================== التخزين المؤقت =====================
 warnings_db = {}
@@ -92,7 +87,6 @@ def clean_obfuscated_text(text: str) -> str:
 
 async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط"):
     if not LOG_CHANNEL_ID:
-        print("⚠️ LOG_CHANNEL_ID غير مضبوط، لن يتم إرسال اللوج.")
         return
     time_now = datetime.now().strftime("%I:%M %p - %d/%m/%Y")
     emoji_map = {
@@ -122,7 +116,6 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
     )
     try:
         await bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_message)
-        print("✅ تم إرسال اللوج بنجاح إلى القناة")
     except Exception as e:
         print(f"❌ فشل إرسال اللوج: {e}")
 
@@ -211,7 +204,7 @@ async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id
         reply_markup=reply_markup
     )
 
-    # استخدام job_queue إذا كان متاحاً
+    # job_queue يعمل تلقائياً في هذا الإصدار
     if context.job_queue:
         job = context.job_queue.run_once(
             callback=kick_if_no_captcha,
@@ -221,7 +214,7 @@ async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id
         )
         pending_captcha[user_id]["job"] = job
     else:
-        print("⚠️ job_queue غير متاح، لن يتم طرد المستخدم تلقائياً.")
+        print("⚠️ job_queue غير مفعل، لن يتم طرد المستخدم تلقائياً.")
 
 
 async def kick_if_no_captcha(context: ContextTypes.DEFAULT_TYPE):
@@ -668,7 +661,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if WALLET_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "محفظة رقمية"
-    elif not is_violation and contains_phone_number(cleaned_text):
+    elif not is_violation and PHONE_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "رقم هاتف"
     elif not is_violation and LOCK_LINKS and LINK_PATTERN.search(cleaned_text):
@@ -680,7 +673,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_violation:
         try:
             await update.message.delete()
-            print(f"✅ تم حذف رسالة مخالفة من {user.first_name} (نوع: {violation_type})")
         except Exception as e:
             print(f"Delete error: {e}")
             return
@@ -746,7 +738,7 @@ def main():
     app.add_handler(CallbackQueryHandler(refresh_captcha, pattern="^refresh_captcha_"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
 
-    print("🤖 Raskov Security Bot يعمل الآن مع جميع الميزات...")
+    print("🤖 Raskov Security Bot يعمل الآن...")
     app.run_polling()
 
 

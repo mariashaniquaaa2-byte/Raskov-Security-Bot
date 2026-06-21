@@ -1,7 +1,7 @@
 import os
 import re
 import random
-import telegram  # ✅ أضفنا هذا الاستيراد لاستخدام telegram.User
+import telegram
 from datetime import datetime, timedelta
 
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
@@ -28,13 +28,12 @@ GROUP_RULES = (
     "5️⃣ احترام جميع الأعضاء، والابتعاد عن الشتائم.\n"
     "6️⃣ التقيد بمواضيع المجموعة الأساسية.\n\n"
     "⚠️ المخالفة = تحذير، والمخالفة الثالثة = حظر تلقائي.\n"
-    "🔐 للتحقق البشري، اكتب نتيجة العملية الحسابية في الخاص أو المجموعة."
+    "🔐 للتحقق البشري، اكتب نتيجة العملية الحسابية في المجموعة."
 )
 
 # ===================== إعدادات الحماية =====================
-AUTO_KICK_TIMEOUT = 60
-MIN_ACCOUNT_AGE_DAYS = 1
-CAPTCHA_ATTEMPTS = 3
+AUTO_KICK_TIMEOUT = 60          # مهلة الكابتشا بالثواني
+CAPTCHA_ATTEMPTS = 3            # عدد المحاولات المسموحة
 
 # ===================== إعدادات مانع التكرار =====================
 FLOOD_LIMIT = 5
@@ -199,22 +198,12 @@ async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id
     keyboard = [[InlineKeyboardButton("🔄 تحديث الكابتشا", callback_data=f"refresh_captcha_{user_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    try:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=f"🤖 تحقق بشري مطلوب!\nأجب على السؤال التالي (اكتب الرقم فقط):\n\n{question}\n\n⏳ لديك {AUTO_KICK_TIMEOUT} ثانية، وإلا ستُطرد.",
-            reply_markup=reply_markup
-        )
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🔐 {first_name}، تم إرسال كابتشا إلى خاصك. أجب خلال {AUTO_KICK_TIMEOUT} ثانية."
-        )
-    except:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🔐 {first_name}، أجب على الكابتشا التالية (اكتب الرقم فقط) في المجموعة:\n\n{question}\n\n⏳ لديك {AUTO_KICK_TIMEOUT} ثانية.",
-            reply_markup=reply_markup
-        )
+    # ✅ إرسال الكابتشا في المجموعة مباشرة (تجنب مشاكل الخاص)
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"🔐 {first_name}، أجب على الكابتشا التالية (اكتب الرقم فقط) في المجموعة:\n\n{question}\n\n⏳ لديك {AUTO_KICK_TIMEOUT} ثانية.",
+        reply_markup=reply_markup
+    )
 
     job = context.job_queue.run_once(
         callback=kick_if_no_captcha,
@@ -240,7 +229,7 @@ async def kick_if_no_captcha(context: ContextTypes.DEFAULT_TYPE):
             )
             await send_log(
                 bot=context.bot,
-                user=telegram.User(id=user_id, first_name=first_name, is_bot=False),  # ✅ تم الإصلاح
+                user=telegram.User(id=user_id, first_name=first_name, is_bot=False),
                 chat_title="المجموعة",
                 deleted_text=f"طرد بسبب عدم إجابة الكابتشا.",
                 violation_type="❌ طرد بسبب عدم الموافقة"
@@ -302,7 +291,7 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
         user_answer = int(update.message.text.strip())
     except ValueError:
         await context.bot.send_message(
-            chat_id=user_id,
+            chat_id=chat_id,
             text="❌ يجب إدخال رقم صحيح. حاول مرة أخرى."
         )
         return
@@ -352,19 +341,13 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
             data["answer"] = new_answer
             pending_captcha[user_id] = data
 
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=f"❌ إجابة خاطئة. حاول مرة أخرى ({attempts}/{CAPTCHA_ATTEMPTS}):\n\n{question}"
-                )
-            except:
-                await context.bot.send_message(
-                    chat_id=original_chat_id,
-                    text=f"❌ {first_name} إجابة خاطئة. حاول مرة أخرى ({attempts}/{CAPTCHA_ATTEMPTS}):\n\n{question}"
-                )
+            await context.bot.send_message(
+                chat_id=original_chat_id,
+                text=f"❌ {first_name} إجابة خاطئة. حاول مرة أخرى ({attempts}/{CAPTCHA_ATTEMPTS}):\n\n{question}"
+            )
 
 
-# ===================== الترحيب والوداع =====================
+# ===================== الترحيب والوداع (معدل) =====================
 
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -384,25 +367,7 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if await is_admin(context.bot, chat.id, user.id):
             continue
 
-        account_age = datetime.now() - user.date
-        if account_age.days < MIN_ACCOUNT_AGE_DAYS:
-            try:
-                await context.bot.ban_chat_member(chat.id, user.id)
-                await context.bot.send_message(
-                    chat.id,
-                    text=f"🛑 {user.first_name} تم طردك لأن حسابك جديد (عمره أقل من {MIN_ACCOUNT_AGE_DAYS} يوم)."
-                )
-                await send_log(
-                    bot=context.bot,
-                    user=user,
-                    chat_title=chat_title,
-                    deleted_text=f"حساب جديد (عمره {account_age.days} يوم) - تم الطرد.",
-                    violation_type="🛑 حساب جديد (ممنوع)"
-                )
-            except Exception as e:
-                print(f"فشل طرد حساب جديد: {e}")
-            continue
-
+        # ✅ تم إزالة فحص عمر الحساب لتجنب AttributeError
         await send_captcha(context, chat.id, user.id, user.first_name)
         await send_log(
             bot=context.bot,
@@ -577,7 +542,6 @@ async def toggle_lock_forward(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ===================== الأوامر العامة =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ✅ تم إزالة HTML بالكامل لتجنب أي خطأ في التنسيق
     await update.message.reply_text(
         "🛡️ Raskov Security Bot v6.0\n\n"
         "🔹 القائمة البيضاء: minepi.com, pi.app\n"
@@ -585,8 +549,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 منع الروابط: مفعل ✅\n"
         "🔹 منع الميديا: معطل ❌\n"
         "🔹 منع التوجيه: معطل ❌\n"
-        "🔹 الترحيب: كابتشا بشري ✅\n"
-        "🔹 حماية الحسابات الجديدة: عمر < 1 يوم = طرد ❌\n\n"
+        "🔹 الترحيب: كابتشا بشري ✅\n\n"
         "👑 أوامر المشرفين:\n"
         "/ban - رد على رسالة العضو\n"
         "/unban [ID]\n"
@@ -773,7 +736,7 @@ def main():
     app.add_handler(CallbackQueryHandler(refresh_captcha, pattern="^refresh_captcha_"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
 
-    print("🤖 Raskov Security Bot يعمل الآن...")
+    print("🤖 Raskov Security Bot يعمل الآن مع الكابتشا في المجموعة...")
     app.run_polling()
 
 

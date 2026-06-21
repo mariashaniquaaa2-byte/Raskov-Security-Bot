@@ -31,9 +31,9 @@ GROUP_RULES = (
 )
 
 # ===================== إعدادات الحماية =====================
-AUTO_KICK_TIMEOUT = 60          # مهلة الكابتشا بالثواني
-MIN_ACCOUNT_AGE_DAYS = 1        # الحد الأدنى لعمر الحساب (أيام)
-CAPTCHA_ATTEMPTS = 3            # عدد المحاولات المسموحة
+AUTO_KICK_TIMEOUT = 60
+MIN_ACCOUNT_AGE_DAYS = 1
+CAPTCHA_ATTEMPTS = 3
 
 # ===================== إعدادات مانع التكرار =====================
 FLOOD_LIMIT = 5
@@ -57,15 +57,14 @@ WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40})\b", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"(?<![a-zA-Z])(\+?\d{7,15})(?![a-zA-Z])")
 
 # ===================== التخزين المؤقت =====================
-warnings_db = {}          # {user_id: count}
-user_messages = {}        # {user_id: [timestamps]}
-pending_captcha = {}      # {user_id: {"answer": int, "attempts": int, "job": job}}
+warnings_db = {}
+user_messages = {}
+pending_captcha = {}
 
 
 # ===================== دوال المساعدة الأساسية =====================
 
 async def is_admin(bot, chat_id, user_id):
-    """التحقق من صلاحيات المشرف"""
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         return member.status in ["administrator", "creator"]
@@ -74,7 +73,6 @@ async def is_admin(bot, chat_id, user_id):
 
 
 def clean_obfuscated_text(text: str) -> str:
-    """تنظيف النص من محاولات إخفاء الروابط"""
     cleaned = re.sub(r'\s+', '', text)
     cleaned = re.sub(r'dot', '.', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'at', '@', cleaned, flags=re.IGNORECASE)
@@ -87,7 +85,6 @@ def clean_obfuscated_text(text: str) -> str:
 
 
 async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط"):
-    """إرسال تقرير إلى قناة اللوجات"""
     if not LOG_CHANNEL_ID:
         return
     time_now = datetime.now().strftime("%I:%M %p - %d/%m/%Y")
@@ -124,7 +121,6 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
 
 
 async def mute_user(bot, chat_id, user_id, duration_minutes):
-    """كتم مستخدم لمدة محددة"""
     try:
         until_date = datetime.now() + timedelta(minutes=duration_minutes)
         await bot.restrict_chat_member(
@@ -140,7 +136,6 @@ async def mute_user(bot, chat_id, user_id, duration_minutes):
 
 
 async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """فحص التكرار، وإذا تجاوز الحد يُكتم المستخدم"""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     now = datetime.now()
@@ -180,7 +175,6 @@ async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
 # ===================== دوال الكابتشا =====================
 
 def generate_captcha() -> tuple:
-    """توليد مسألة حسابية عشوائية"""
     a = random.randint(1, 10)
     b = random.randint(1, 10)
     op = random.choice(['+', '-'])
@@ -194,7 +188,6 @@ def generate_captcha() -> tuple:
 
 
 async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, first_name: str):
-    """إرسال الكابتشا للعضو الجديد"""
     question, answer = generate_captcha()
     pending_captcha[user_id] = {
         "answer": answer,
@@ -232,7 +225,6 @@ async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id
 
 
 async def kick_if_no_captcha(context: ContextTypes.DEFAULT_TYPE):
-    """طرد العضو إذا لم يجب على الكابتشا خلال المهلة"""
     data = context.job.data
     chat_id = data["chat_id"]
     user_id = data["user_id"]
@@ -260,7 +252,6 @@ async def kick_if_no_captcha(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def refresh_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """تحديث الكابتشا عند الضغط على الزر"""
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -285,7 +276,6 @@ async def refresh_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج إجابة المستخدم على الكابتشا (رسالة نصية)"""
     if not update.message or not update.message.text:
         return
     user = update.effective_user
@@ -317,7 +307,6 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if user_answer == correct_answer:
-        # ✅ إجابة صحيحة
         if "job" in data:
             data["job"].schedule_removal()
         del pending_captcha[user_id]
@@ -334,13 +323,11 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
             violation_type="🤖 كابتشا - نجاح"
         )
     else:
-        # ❌ إجابة خاطئة
         attempts = data.get("attempts", 0) + 1
         data["attempts"] = attempts
         pending_captcha[user_id] = data
 
         if attempts >= CAPTCHA_ATTEMPTS:
-            # طرد فوري بعد المحاولات الخاطئة
             try:
                 await context.bot.ban_chat_member(chat_id=original_chat_id, user_id=user_id)
                 await context.bot.send_message(
@@ -360,7 +347,6 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception as e:
                 print(f"فشل الطرد: {e}")
         else:
-            # إرسال كابتشا جديدة
             question, new_answer = generate_captcha()
             data["answer"] = new_answer
             pending_captcha[user_id] = data
@@ -380,7 +366,6 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
 # ===================== الترحيب والوداع =====================
 
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج انضمام أعضاء جدد مع كابتشا"""
     chat = update.effective_chat
     chat_title = chat.title or "المجموعة"
 
@@ -398,7 +383,6 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if await is_admin(context.bot, chat.id, user.id):
             continue
 
-        # فحص عمر الحساب
         account_age = datetime.now() - user.date
         if account_age.days < MIN_ACCOUNT_AGE_DAYS:
             try:
@@ -418,7 +402,6 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 print(f"فشل طرد حساب جديد: {e}")
             continue
 
-        # إرسال الكابتشا
         await send_captcha(context, chat.id, user.id, user.first_name)
         await send_log(
             bot=context.bot,
@@ -430,7 +413,6 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج مغادرة الأعضاء"""
     chat = update.effective_chat
     chat_title = chat.title or "المجموعة"
     user = update.message.left_chat_member
@@ -443,7 +425,6 @@ async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"🚪 وداعاً {user.first_name}، نتمنى لك التوفيق! 🤍"
     )
 
-    # حذف من قوائم الانتظار إذا كان موجوداً
     if user.id in pending_captcha:
         job = pending_captcha[user.id].get("job")
         if job:
@@ -649,7 +630,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_title = update.effective_chat.title or "المجموعة"
     user = update.effective_user
 
-    # إذا كان المستخدم في قائمة انتظار الكابتشا، نمنعه من الكلام
     if user_id in pending_captcha:
         try:
             await update.message.delete()
@@ -661,15 +641,12 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
-    # فحص التكرار
     if await check_flood(update, context):
         return
 
-    # التحقق من المشرفين
     if await is_admin(context.bot, chat_id, user_id):
         return
 
-    # ====== فحص الميديا ======
     if LOCK_MEDIA and (update.message.photo or update.message.video):
         try:
             await update.message.delete()
@@ -688,7 +665,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ====== فحص الرسائل المعاد توجيهها ======
     if LOCK_FORWARD and update.message.forward_date:
         try:
             await update.message.delete()
@@ -707,7 +683,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ====== فحص النص ======
     if not update.message.text:
         return
 
@@ -781,7 +756,9 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    # أوامر المشرفين
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("warnings", warnings))
+    app.add_handler(CommandHandler("testlog", test_log))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
     app.add_handler(CommandHandler("resetwarnings", reset_warnings))
@@ -789,26 +766,13 @@ def main():
     app.add_handler(CommandHandler("lockmedia", toggle_lock_media))
     app.add_handler(CommandHandler("lockforward", toggle_lock_forward))
 
-    # أوامر عامة
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("warnings", warnings))
-    app.add_handler(CommandHandler("testlog", test_log))
-
-    # معالج الترحيب (انضمام أعضاء جدد)
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-    # معالج الوداع (مغادرة أعضاء)
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_member))
-
-    # معالج الكابتشا (يستمع للرسائل النصية)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_captcha_answer))
-
-    # معالج أزرار الكابتشا
     app.add_handler(CallbackQueryHandler(refresh_captcha, pattern="^refresh_captcha_"))
-
-    # معالج جميع الرسائل (يأتي أخيراً)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
 
-    print("🤖 البوت يعمل الآن مع الكابتشا وحماية الحسابات الجديدة...")
+    print("🤖 Raskov Security Bot يعمل الآن...")
     app.run_polling()
 
 

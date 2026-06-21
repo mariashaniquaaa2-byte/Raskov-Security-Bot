@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import telegram  # ✅ أضفنا هذا الاستيراد لاستخدام telegram.User
 from datetime import datetime, timedelta
 
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
@@ -19,7 +20,7 @@ LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
 # ===================== القوانين =====================
 GROUP_RULES = (
-    "📜 <b>قوانين المجموعة</b> 📜\n\n"
+    "📜 قوانين المجموعة 📜\n\n"
     "1️⃣ ممنوع نشر الروابط (ما عدا minepi.com و pi.app).\n"
     "2️⃣ ممنوع نشر أرقام الهواتف أو المحافظ الرقمية.\n"
     "3️⃣ ممنوع التكرار السريع للرسائل (سبام).\n"
@@ -108,14 +109,14 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
     emoji = emoji_map.get(violation_type, "⚠️")
     log_message = (
         f"🕒 {time_now}\n"
-        f"{emoji} <b>{violation_type}</b>\n"
+        f"{emoji} {violation_type}\n"
         f"👤 المستخدم: {user.first_name}\n"
-        f"🆔 معرفه: <code>{user.id}</code>\n"
+        f"🆔 معرفه: {user.id}\n"
         f"🏠 المجموعة: {chat_title}\n"
-        f"📝 التفاصيل:\n<code>{deleted_text[:150]}</code>"
+        f"📝 التفاصيل:\n{deleted_text[:150]}"
     )
     try:
-        await bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_message, parse_mode="HTML")
+        await bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_message)
     except Exception as e:
         print(f"❌ فشل إرسال اللوج: {e}")
 
@@ -239,7 +240,7 @@ async def kick_if_no_captcha(context: ContextTypes.DEFAULT_TYPE):
             )
             await send_log(
                 bot=context.bot,
-                user=telegram.User(id=user_id, first_name=first_name, is_bot=False),
+                user=telegram.User(id=user_id, first_name=first_name, is_bot=False),  # ✅ تم الإصلاح
                 chat_title="المجموعة",
                 deleted_text=f"طرد بسبب عدم إجابة الكابتشا.",
                 violation_type="❌ طرد بسبب عدم الموافقة"
@@ -576,26 +577,26 @@ async def toggle_lock_forward(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ===================== الأوامر العامة =====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ✅ تم إزالة HTML بالكامل لتجنب أي خطأ في التنسيق
     await update.message.reply_text(
-        "🛡️ <b>Raskov Security Bot v6.0</b>\n\n"
-        "🔹 <b>القائمة البيضاء</b>: minepi.com, pi.app\n"
-        "🔹 <b>مانع التكرار</b>: 5 رسائل / 4 ثوان = كتم 5د\n"
-        "🔹 <b>منع الروابط</b>: مفعل ✅\n"
-        "🔹 <b>منع الميديا</b>: معطل ❌\n"
-        "🔹 <b>منع التوجيه</b>: معطل ❌\n"
-        "🔹 <b>الترحيب</b>: كابتشا بشري ✅\n"
-        "🔹 <b>حماية الحسابات الجديدة</b>: عمر < {MIN_ACCOUNT_AGE_DAYS} يوم = طرد ❌\n\n"
-        "👑 <b>أوامر المشرفين</b>:\n"
+        "🛡️ Raskov Security Bot v6.0\n\n"
+        "🔹 القائمة البيضاء: minepi.com, pi.app\n"
+        "🔹 مانع التكرار: 5 رسائل / 4 ثوان = كتم 5د\n"
+        "🔹 منع الروابط: مفعل ✅\n"
+        "🔹 منع الميديا: معطل ❌\n"
+        "🔹 منع التوجيه: معطل ❌\n"
+        "🔹 الترحيب: كابتشا بشري ✅\n"
+        "🔹 حماية الحسابات الجديدة: عمر < 1 يوم = طرد ❌\n\n"
+        "👑 أوامر المشرفين:\n"
         "/ban - رد على رسالة العضو\n"
         "/unban [ID]\n"
         "/resetwarnings - رد على رسالة العضو\n"
         "/locklinks - تبديل\n"
         "/lockmedia - تبديل\n"
         "/lockforward - تبديل\n\n"
-        "👤 <b>أوامر الأعضاء</b>:\n"
+        "👤 أوامر الأعضاء:\n"
         "/warnings - عرض مخالفاتك\n"
-        "/testlog - اختبار اللوجات (للمشرفين)",
-        parse_mode="HTML"
+        "/testlog - اختبار اللوجات (للمشرفين)"
     )
 
 

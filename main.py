@@ -32,8 +32,8 @@ GROUP_RULES = (
 )
 
 # ===================== إعدادات الحماية =====================
-AUTO_KICK_TIMEOUT = 60          # مهلة الكابتشا بالثواني
-CAPTCHA_ATTEMPTS = 3            # عدد المحاولات المسموحة
+AUTO_KICK_TIMEOUT = 60
+CAPTCHA_ATTEMPTS = 3
 
 # ===================== إعدادات مانع التكرار =====================
 FLOOD_LIMIT = 5
@@ -55,7 +55,7 @@ LINK_PATTERN = re.compile(
 )
 WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40})\b", re.IGNORECASE)
 
-# ✅ إصلاح نمط رقم الهاتف: يلتقط الأرقام التي تبدأ بـ 0 أو + وتتكون من 7-15 رقماً
+# ✅ نمط رقم الهاتف الصحيح (يلتقط الأرقام التي تبدأ بـ 0 أو +)
 PHONE_PATTERN = re.compile(
     r"(\+?\d{7,15})"
 )
@@ -66,7 +66,7 @@ user_messages = {}
 pending_captcha = {}
 
 
-# ===================== دوال المساعدة الأساسية =====================
+# ===================== دوال المساعدة =====================
 
 async def is_admin(bot, chat_id, user_id):
     try:
@@ -207,8 +207,9 @@ async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id
         reply_markup=reply_markup
     )
 
+    # التأكد من وجود job_queue
     if context.job_queue is None:
-        print("⚠️ job_queue غير مفعل!")
+        print("⚠️ job_queue غير مفعل! سيتم تجاهل الطرد التلقائي.")
         return
 
     job = context.job_queue.run_once(
@@ -661,17 +662,12 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_violation = False
     violation_type = "رابط غير مسموح"
 
-    # فحص المحفظة الرقمية
     if WALLET_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "محفظة رقمية"
-
-    # فحص رقم الهاتف
     elif not is_violation and PHONE_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "رقم هاتف"
-
-    # فحص الرابط
     elif not is_violation and LOCK_LINKS and LINK_PATTERN.search(cleaned_text):
         is_allowed = any(domain in cleaned_text.lower() for domain in ALLOWED_DOMAINS)
         if not is_allowed:
@@ -685,7 +681,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Delete error: {e}")
             return
 
-        # ✅ إرسال اللوج
         await send_log(
             bot=context.bot,
             user=user,
@@ -729,8 +724,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===================== تشغيل البوت =====================
 
 def main():
-    # ✅ تفعيل job_queue بشكل صريح
-    app = Application.builder().token(TOKEN).job_queue().build()
+    app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("warnings", warnings))

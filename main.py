@@ -2,7 +2,6 @@ import os
 import re
 import random
 from datetime import datetime, timedelta
-import telegram
 
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -18,7 +17,7 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
-# ===================== قوانين المجموعة =====================
+# ===================== القوانين =====================
 GROUP_RULES = (
     "📜 <b>قوانين المجموعة</b> 📜\n\n"
     "1️⃣ ممنوع نشر الروابط (ما عدا minepi.com و pi.app).\n"
@@ -32,9 +31,9 @@ GROUP_RULES = (
 )
 
 # ===================== إعدادات الحماية =====================
-AUTO_KICK_TIMEOUT = 60        # مهلة الكابتشا بالثواني
-MIN_ACCOUNT_AGE_DAYS = 1      # الحد الأدنى لعمر الحساب (أيام)
-CAPTCHA_ATTEMPTS = 3          # عدد المحاولات المسموحة
+AUTO_KICK_TIMEOUT = 60          # مهلة الكابتشا بالثواني
+MIN_ACCOUNT_AGE_DAYS = 1        # الحد الأدنى لعمر الحساب (أيام)
+CAPTCHA_ATTEMPTS = 3            # عدد المحاولات المسموحة
 
 # ===================== إعدادات مانع التكرار =====================
 FLOOD_LIMIT = 5
@@ -765,7 +764,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=chat_id,
                     text=f"🚫 تم حظر {user.first_name} تلقائياً (3/3)."
                 )
-                # إعادة تعيين المخالفات بعد الحظر (اختياري)
                 if user_id in warnings_db:
                     del warnings_db[user_id]
             except Exception as e:

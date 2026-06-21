@@ -1,5 +1,7 @@
 import os
 import re
+import random
+import asyncio
 from datetime import datetime, timedelta
 import telegram
 
@@ -17,7 +19,7 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
-# ===================== القوانين =====================
+# ===================== قوانين المجموعة =====================
 GROUP_RULES = (
     "📜 <b>قوانين المجموعة</b> 📜\n\n"
     "1️⃣ ممنوع نشر الروابط (ما عدا minepi.com و pi.app).\n"
@@ -27,13 +29,13 @@ GROUP_RULES = (
     "5️⃣ احترام جميع الأعضاء، والابتعاد عن الشتائم.\n"
     "6️⃣ التقيد بمواضيع المجموعة الأساسية.\n\n"
     "⚠️ المخالفة = تحذير، والمخالفة الثالثة = حظر تلقائي.\n"
-    "👆 اضغط على زر 'موافق' لتأكيد قبولك القوانين."
+    "🔐 للتحقق البشري، اكتب نتيجة العملية الحسابية في الخاص أو المجموعة."
 )
 
-AUTO_KICK_TIMEOUT = 60  # مدة الانتظار بالثواني قبل طرد العضو غير الموافق
-
-# ===================== القائمة البيضاء =====================
-ALLOWED_DOMAINS = ["minepi.com", "pi.app"]
+# ===================== إعدادات الحماية =====================
+AUTO_KICK_TIMEOUT = 60        # مهلة الكابتشا بالثواني
+MIN_ACCOUNT_AGE_DAYS = 1      # أقل عمر للحساب (بالأيام) للسماح بالدخول
+CAPTCHA_ATTEMPTS = 3          # عدد المحاولات المسموحة قبل الطرد
 
 # ===================== إعدادات مانع التكرار =====================
 FLOOD_LIMIT = 5
@@ -54,9 +56,10 @@ WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40})\b", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"(?<![a-zA-Z])(\+?\d{7,15})(?![a-zA-Z])")
 
 # ===================== التخزين المؤقت =====================
-warnings_db = {}           # {user_id: count}
-user_messages = {}         # {user_id: [timestamps]}
-pending_approvals = {}     # {user_id: job_object} لتتبع الأعضاء الجدد
+warnings_db = {}                 # {user_id: count}
+user_messages = {}               # {user_id: [timestamps]}
+pending_captcha = {}             # {user_id: {"answer": int, "attempts": int, "job": job}}
+captcha_attempts = {}            # {user_id: int} عدد المحاولات الخاطئة
 
 
 # ===================== دوال المساعدة =====================
@@ -101,6 +104,9 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
         "👋 ترحيب": "👋",
         "🚪 مغادرة": "🚪",
         "❌ طرد بسبب عدم الموافقة": "⛔",
+        "🤖 كابتشا - نجاح": "✅",
+        "🤖 كابتشا - فشل": "❌",
+        "🛑 حساب جديد (ممنوع)": "🛑",
     }
     emoji = emoji_map.get(violation_type, "⚠️")
     log_message = (
@@ -169,14 +175,254 @@ async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     return False
 
 
-# ===================== الترحيب والوداع =====================
+# ===================== دوال الكابتشا =====================
+
+def generate_captcha() -> tuple:
+    """توليد مسألة حسابية عشوائية وإرجاع (النص, الإجابة)"""
+    a = random.randint(1, 10)
+    b = random.randint(1, 10)
+    op = random.choice(['+', '-'])
+    if op == '-':
+        # نتأكد أن الناتج موجب
+        if a < b:
+            a, b = b, a
+        answer = a - b
+    else:
+        answer = a + b
+    question = f"{a} {op} {b} = ؟"
+    return question, answer
+
+
+async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, first_name: str):
+    """إرسال الكابتشا للعضو الجديد"""
+    question, answer = generate_captcha()
+    
+    # تخزين الإجابة والمحاولات
+    pending_captcha[user_id] = {
+        "answer": answer,
+        "attempts": 0,
+        "chat_id": chat_id,
+        "first_name": first_name
+    }
+
+    # أزرار إعادة التوليد
+    keyboard = [
+        [InlineKeyboardButton("🔄 تحديث الكابتشا", callback_data=f"refresh_captcha_{user_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # محاولة إرسال الكابتشا في الخاص
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"🤖 تحقق بشري مطلوب!\nأجب على السؤال التالي (اكتب الرقم فقط):\n\n{question}\n\n⏳ لديك {AUTO_KICK_TIMEOUT} ثانية، وإلا ستُطرد.",
+            reply_markup=reply_markup
+        )
+        # إعلام في المجموعة
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🔐 {first_name}، تم إرسال كابتشا إلى خاصك. أجب خلال {AUTO_KICK_TIMEOUT} ثانية."
+        )
+    except:
+        # إذا لم يستقبل الخاص، نرسل في المجموعة
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🔐 {first_name}، أجب على الكابتشا التالية (اكتب الرقم فقط) في المجموعة:\n\n{question}\n\n⏳ لديك {AUTO_KICK_TIMEOUT} ثانية.",
+            reply_markup=reply_markup
+        )
+
+    # جدولة طرد العضو إذا لم يجب
+    job = context.job_queue.run_once(
+        callback=kick_if_no_captcha,
+        when=AUTO_KICK_TIMEOUT,
+        data={"chat_id": chat_id, "user_id": user_id, "first_name": first_name},
+        name=f"captcha_{user_id}"
+    )
+    pending_captcha[user_id]["job"] = job
+
+
+async def kick_if_no_captcha(context: ContextTypes.DEFAULT_TYPE):
+    """طرد العضو إذا لم يجب على الكابتشا خلال المهلة"""
+    data = context.job.data
+    chat_id = data["chat_id"]
+    user_id = data["user_id"]
+    first_name = data["first_name"]
+
+    if user_id in pending_captcha:
+        try:
+            await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⛔ {first_name} تم طرده لعدم إجابة الكابتشا خلال {AUTO_KICK_TIMEOUT} ثانية."
+            )
+            await send_log(
+                bot=context.bot,
+                user=telegram.User(id=user_id, first_name=first_name, is_bot=False),
+                chat_title="المجموعة",
+                deleted_text=f"طرد بسبب عدم إجابة الكابتشا.",
+                violation_type="❌ طرد بسبب عدم الموافقة"
+            )
+        except Exception as e:
+            print(f"فشل طرد العضو {user_id}: {e}")
+        finally:
+            # تنظيف
+            if user_id in pending_captcha:
+                del pending_captcha[user_id]
+            if user_id in captcha_attempts:
+                del captcha_attempts[user_id]
+
+
+async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج إجابة المستخدم على الكابتشا (رسالة نصية)"""
+    if not update.message or not update.message.text:
+        return
+
+    user = update.effective_user
+    user_id = user.id
+    chat_id = update.effective_chat.id
+
+    # نتحقق إذا كان المستخدم في قائمة انتظار الكابتشا
+    if user_id not in pending_captcha:
+        return
+
+    # تجاهل إذا كان مشرفاً
+    if await is_admin(context.bot, chat_id, user_id):
+        return
+
+    data = pending_captcha[user_id]
+    correct_answer = data["answer"]
+    first_name = data["first_name"]
+    original_chat_id = data["chat_id"]
+
+    # نحذف رسالة المستخدم حتى لا تلوث المجموعة
+    try:
+        await update.message.delete()
+    except:
+        pass
+
+    # نفحص الإجابة
+    try:
+        user_answer = int(update.message.text.strip())
+    except ValueError:
+        # ليست رقماً
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="❌ يجب إدخال رقم صحيح. حاول مرة أخرى."
+        )
+        return
+
+    if user_answer == correct_answer:
+        # ✅ إجابة صحيحة
+        # إلغاء مهمة الطرد
+        if "job" in data:
+            data["job"].schedule_removal()
+        
+        # إزالة من قائمة الانتظار
+        del pending_captcha[user_id]
+        if user_id in captcha_attempts:
+            del captcha_attempts[user_id]
+
+        # رسالة ترحيب في المجموعة
+        await context.bot.send_message(
+            chat_id=original_chat_id,
+            text=f"🎉 أهلاً وسهلاً بك {first_name} في المجموعة! تم التحقق بنجاح ✅"
+        )
+
+        # تسجيل في اللوجات
+        await send_log(
+            bot=context.bot,
+            user=user,
+            chat_title=update.effective_chat.title or "المجموعة",
+            deleted_text=f"أجاب الكابتشا بشكل صحيح.",
+            violation_type="🤖 كابتشا - نجاح"
+        )
+    else:
+        # ❌ إجابة خاطئة
+        attempts = data.get("attempts", 0) + 1
+        data["attempts"] = attempts
+        pending_captcha[user_id] = data
+
+        if attempts >= CAPTCHA_ATTEMPTS:
+            # طرد فوري بعد المحاولات الخاطئة
+            try:
+                await context.bot.ban_chat_member(chat_id=original_chat_id, user_id=user_id)
+                await context.bot.send_message(
+                    chat_id=original_chat_id,
+                    text=f"⛔ {first_name} تم طرده لتكرار الإجابة الخاطئة ({CAPTCHA_ATTEMPTS} محاولات)."
+                )
+                # إلغاء مهمة الطرد
+                if "job" in data:
+                    data["job"].schedule_removal()
+                del pending_captcha[user_id]
+                if user_id in captcha_attempts:
+                    del captcha_attempts[user_id]
+                await send_log(
+                    bot=context.bot,
+                    user=user,
+                    chat_title=update.effective_chat.title or "المجموعة",
+                    deleted_text=f"طرد بسبب فشل الكابتشا {CAPTCHA_ATTEMPTS} مرات.",
+                    violation_type="🤖 كابتشا - فشل"
+                )
+            except Exception as e:
+                print(f"فشل الطرد: {e}")
+        else:
+            # إرسال كابتشا جديدة
+            question, new_answer = generate_captcha()
+            data["answer"] = new_answer
+            pending_captcha[user_id] = data
+
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=f"❌ إجابة خاطئة. حاول مرة أخرى ({attempts}/{CAPTCHA_ATTEMPTS}):\n\n{question}"
+                )
+            except:
+                await context.bot.send_message(
+                    chat_id=original_chat_id,
+                    text=f"❌ {first_name} إجابة خاطئة. حاول مرة أخرى ({attempts}/{CAPTCHA_ATTEMPTS}):\n\n{question}"
+                )
+
+
+async def refresh_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تحديث الكابتشا عند ضغط الزر"""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("refresh_captcha_"):
+        return
+
+    user_id = int(data.split("_")[2])
+    user = query.from_user
+
+    if user.id != user_id:
+        await query.edit_message_text("❌ هذا الزر ليس مخصصاً لك.")
+        return
+
+    if user_id not in pending_captcha:
+        await query.edit_message_text("ℹ️ انتهت مهلة الكابتشا أو تم التحقق مسبقاً.")
+        return
+
+    # توليد كابتشا جديدة
+    question, new_answer = generate_captcha()
+    pending_captcha[user_id]["answer"] = new_answer
+
+    await query.edit_message_text(
+        text=f"🔄 تم تحديث الكابتشا:\n\n{question}\n\nأجب بالرقم فقط.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 تحديث الكابتشا", callback_data=f"refresh_captcha_{user_id}")]
+        ])
+    )
+
+
+# ===================== الترحيب مع الكابتشا =====================
 
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج انضمام الأعضاء الجدد"""
+    """معالج انضمام أعضاء جدد مع كابتشا"""
     chat = update.effective_chat
     chat_title = chat.title or "المجموعة"
-    
-    # التأكد من أن البوت مشرف في المجموعة
+
+    # التأكد من صلاحيات البوت
     try:
         bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
         if bot_member.status not in ["administrator", "creator"]:
@@ -186,183 +432,48 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     for new_member in update.message.new_chat_members:
         user = new_member
-        
-        # تجاهل انضمام البوت نفسه
+
         if user.id == context.bot.id:
             continue
 
-        # التحقق من أنه ليس مشرفاً (لا نطبق القوانين على المشرفين الجدد إن أمكن)
         if await is_admin(context.bot, chat.id, user.id):
             continue
 
-        # إنشاء أزرار الموافقة
-        keyboard = [
-            [InlineKeyboardButton("✅ أوافق على القوانين", callback_data=f"agree_rules_{user.id}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        # إرسال رسالة القوانين (خاصة بالعضو الجديد)
-        try:
-            # محاولة إرسالها في الخاص أولاً
-            await context.bot.send_message(
-                chat_id=user.id,
-                text=GROUP_RULES,
-                parse_mode="HTML",
-                reply_markup=reply_markup
-            )
-            await update.message.reply_text(f"👋 مرحباً {user.first_name}! تم إرسال قوانين المجموعة إلى خاصك. يرجى الموافقة عليها.")
-        except:
-            # إذا كان العضو قد حظر البوت أو لا يستقبل خاص، نرسلها في المجموعة
-            msg = await context.bot.send_message(
-                chat_id=chat.id,
-                text=f"👋 مرحباً {user.first_name}!\n\n{GROUP_RULES}",
-                parse_mode="HTML",
-                reply_markup=reply_markup
-            )
-            # نثبت الرسالة (اختياري)
+        # 📌 فحص عمر الحساب
+        account_age = datetime.now() - user.date
+        if account_age.days < MIN_ACCOUNT_AGE_DAYS:
+            # طرد فوري
             try:
-                await context.bot.pin_chat_message(chat.id, msg.message_id, disable_notification=True)
-            except:
-                pass
+                await context.bot.ban_chat_member(chat.id, user.id)
+                await context.bot.send_message(
+                    chat.id,
+                    text=f"🛑 {user.first_name} تم طردك لأن حسابك جديد (عمره أقل من {MIN_ACCOUNT_AGE_DAYS} يوم)."
+                )
+                await send_log(
+                    bot=context.bot,
+                    user=user,
+                    chat_title=chat_title,
+                    deleted_text=f"حساب جديد (عمره {account_age.days} يوم) - تم الطرد.",
+                    violation_type="🛑 حساب جديد (ممنوع)"
+                )
+            except Exception as e:
+                print(f"فشل طرد حساب جديد: {e}")
+            continue
 
-        # تسجيل العضو في قائمة الانتظار للموافقة
-        # جدولة طرد العضو إذا لم يوافق خلال المدة المحددة
-        job = context.job_queue.run_once(
-            callback=kick_non_agreed,
-            when=AUTO_KICK_TIMEOUT,
-            data={"chat_id": chat.id, "user_id": user.id, "username": user.first_name},
-            name=f"kick_{user.id}"
-        )
-        pending_approvals[user.id] = job
+        # إرسال الكابتشا
+        await send_captcha(context, chat.id, user.id, user.first_name)
 
         # تسجيل في اللوجات
         await send_log(
             bot=context.bot,
             user=user,
             chat_title=chat_title,
-            deleted_text=f"انضم العضو. في انتظار الموافقة على القوانين ({AUTO_KICK_TIMEOUT} ثانية)",
-            violation_type="👋 ترحيب"
+            deleted_text=f"انضم العضو. جاري إرسال الكابتشا.",
+            violation_type="👋 ترحيب (كابتشا)"
         )
 
 
-async def kick_non_agreed(context: ContextTypes.DEFAULT_TYPE):
-    """طرد العضو الذي لم يوافق على القوانين بعد المهلة"""
-    data = context.job.data
-    chat_id = data["chat_id"]
-    user_id = data["user_id"]
-    username = data.get("username", f"ID:{user_id}")
-
-    # التأكد من أن العضو لا يزال في المجموعة ولم يوافق بعد
-    if user_id in pending_approvals:
-        try:
-            # طرد العضو
-            await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"⛔ {username} تم طرده تلقائياً لعدم موافقته على قوانين المجموعة خلال {AUTO_KICK_TIMEOUT} ثانية."
-            )
-            # تسجيل في اللوجات
-            await send_log(
-                bot=context.bot,
-                user=telegram.User(id=user_id, first_name=username, is_bot=False),
-                chat_title="المجموعة",
-                deleted_text=f"تم طرد {username} (ID: {user_id}) لعدم الموافقة على القوانين.",
-                violation_type="❌ طرد بسبب عدم الموافقة"
-            )
-            # إزالة من القائمة
-            del pending_approvals[user_id]
-        except Exception as e:
-            print(f"فشل طرد العضو {user_id}: {e}")
-
-
-async def handle_rules_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج الضغط على زر الموافقة على القوانين"""
-    query = update.callback_query
-    await query.answer()
-
-    # استخراج user_id من البيانات
-    data = query.data
-    if not data.startswith("agree_rules_"):
-        return
-
-    user_id = int(data.split("_")[2])
-    user = query.from_user
-
-    # التأكد من أن المستخدم الذي ضغط هو نفسه المستخدم الجديد
-    if user.id != user_id:
-        await query.edit_message_text("❌ هذا الزر ليس مخصصاً لك.")
-        return
-
-    # إلغاء مهمة الطرد المجدولة
-    if user_id in pending_approvals:
-        job = pending_approvals[user_id]
-        job.schedule_removal()  # إلغاء الطرد
-        del pending_approvals[user_id]
-
-        # تعديل الرسالة لإظهار التأكيد
-        await query.edit_message_text(
-            text=f"✅ {user.first_name}، تم تأكيد موافقتك على قوانين المجموعة!\nأهلاً وسهلاً بك 🎉",
-            parse_mode="HTML"
-        )
-
-        # إرسال رسالة ترحيب في المجموعة (اختياري)
-        chat_id = update.effective_chat.id
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🎉 أهلاً وسهلاً بك {user.first_name} في المجموعة! استمتع بوقتك 🚀"
-        )
-
-        # إزالة تثبيت الرسالة إذا كانت مثبتة
-        try:
-            # نحاول إلغاء تثبيت الرسالة (اختياري)
-            await context.bot.unpin_chat_message(chat_id=chat_id)
-        except:
-            pass
-
-        # تسجيل في اللوجات
-        await send_log(
-            bot=context.bot,
-            user=user,
-            chat_title=update.effective_chat.title or "المجموعة",
-            deleted_text="وافق العضو على القوانين وانضم بنجاح.",
-            violation_type="👋 ترحيب (موافقة)"
-        )
-    else:
-        await query.edit_message_text("ℹ️ تمت الموافقة مسبقاً أو انتهت المهلة.")
-
-
-async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالج مغادرة الأعضاء"""
-    chat = update.effective_chat
-    chat_title = chat.title or "المجموعة"
-    user = update.message.left_chat_member
-
-    if user.id == context.bot.id:
-        return
-
-    # إرسال رسالة وداع
-    await context.bot.send_message(
-        chat_id=chat.id,
-        text=f"🚪 وداعاً {user.first_name}، نتمنى لك التوفيق! 🤍"
-    )
-
-    # حذف العضو من قائمة الانتظار إذا كان معلقاً (في حالة غادره قبل الموافقة)
-    if user.id in pending_approvals:
-        job = pending_approvals[user.id]
-        job.schedule_removal()
-        del pending_approvals[user.id]
-
-    # تسجيل في اللوجات
-    await send_log(
-        bot=context.bot,
-        user=user,
-        chat_title=chat_title,
-        deleted_text="غادر العضو المجموعة.",
-        violation_type="🚪 مغادرة"
-    )
-
-
-# ===================== أوامر المشرفين =====================
+# ===================== أوامر المشرفين (نفسها مع تعديل بسيط) =====================
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -499,13 +610,14 @@ async def toggle_lock_forward(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🛡️ <b>Raskov Security Bot v5.0</b>\n\n"
+        "🛡️ <b>Raskov Security Bot v6.0</b>\n\n"
         "🔹 <b>القائمة البيضاء</b>: minepi.com, pi.app\n"
         "🔹 <b>مانع التكرار</b>: 5 رسائل / 4 ثوان = كتم 5د\n"
         "🔹 <b>منع الروابط</b>: مفعل ✅\n"
         "🔹 <b>منع الميديا</b>: معطل ❌\n"
         "🔹 <b>منع التوجيه</b>: معطل ❌\n"
-        "🔹 <b>الترحيب</b>: مفعل ✅ (مع قوانين وموافقة)\n\n"
+        "🔹 <b>الترحيب</b>: كابتشا بشري ✅\n"
+        "🔹 <b>حماية الحسابات الجديدة</b>: عمر < {MIN_ACCOUNT_AGE_DAYS} يوم = طرد ❌\n\n"
         "👑 <b>أوامر المشرفين</b>:\n"
         "/ban - رد على رسالة العضو\n"
         "/unban [ID]\n"
@@ -540,7 +652,7 @@ async def test_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ فشل الإرسال: {e}")
 
 
-# ===================== المعالج الرئيسي =====================
+# ===================== المعالج الرئيسي (مع منع الكتابة أثناء الكابتشا) =====================
 
 async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
@@ -550,6 +662,18 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_title = update.effective_chat.title or "المجموعة"
     user = update.effective_user
+
+    # 🔥 إذا كان المستخدم في قائمة انتظار الكابتشا، نحذف رسالته ونمنعه من الكلام
+    if user_id in pending_captcha:
+        try:
+            await update.message.delete()
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⚠️ {user.first_name}، أنت في مرحلة التحقق البشري. أجب على الكابتشا أولاً."
+            )
+        except:
+            pass
+        return
 
     # 1. فحص التكرار
     if await check_flood(update, context):
@@ -667,7 +791,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===================== تشغيل البوت =====================
 
 def main():
-    # بناء التطبيق مع Job Queue (ضروري للطرد التلقائي)
     app = Application.builder().token(TOKEN).build()
 
     # أوامر المشرفين
@@ -683,20 +806,54 @@ def main():
     app.add_handler(CommandHandler("warnings", warnings))
     app.add_handler(CommandHandler("testlog", test_log))
 
-    # معالج الترحيب (انضمام أعضاء جدد)
+    # معالج الترحيب
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-    
-    # معالج الوداع (مغادرة أعضاء)
+    # معالج الوداع (نفسه)
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_member))
 
-    # معالج ضغط الأزرار (الموافقة على القوانين)
-    app.add_handler(CallbackQueryHandler(handle_rules_approval, pattern="^agree_rules_"))
+    # معالج الكابتشا (يستمع للرسائل النصية)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_captcha_answer))
+
+    # معالج أزرار الكابتشا
+    app.add_handler(CallbackQueryHandler(refresh_captcha, pattern="^refresh_captcha_"))
 
     # معالج جميع الرسائل (يأتي أخيراً)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
 
-    print("🤖 البوت يعمل الآن مع الترحيب والوداع...")
+    print("🤖 البوت يعمل الآن مع الكابتشا وحماية الحسابات الجديدة...")
     app.run_polling()
+
+
+async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج مغادرة الأعضاء (نفسه)"""
+    chat = update.effective_chat
+    chat_title = chat.title or "المجموعة"
+    user = update.message.left_chat_member
+
+    if user.id == context.bot.id:
+        return
+
+    await context.bot.send_message(
+        chat_id=chat.id,
+        text=f"🚪 وداعاً {user.first_name}، نتمنى لك التوفيق! 🤍"
+    )
+
+    # حذف من قوائم الانتظار إذا كان موجوداً
+    if user.id in pending_captcha:
+        job = pending_captcha[user.id].get("job")
+        if job:
+            job.schedule_removal()
+        del pending_captcha[user.id]
+    if user.id in captcha_attempts:
+        del captcha_attempts[user.id]
+
+    await send_log(
+        bot=context.bot,
+        user=user,
+        chat_title=chat_title,
+        deleted_text="غادر العضو المجموعة.",
+        violation_type="🚪 مغادرة"
+    )
 
 
 if __name__ == "__main__":

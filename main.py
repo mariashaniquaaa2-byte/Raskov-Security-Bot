@@ -54,7 +54,11 @@ LINK_PATTERN = re.compile(
     re.IGNORECASE
 )
 WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40})\b", re.IGNORECASE)
-PHONE_PATTERN = re.compile(r"(?<![a-zA-Z])(\+?\d{7,15})(?![a-zA-Z])")
+
+# ✅ إصلاح نمط رقم الهاتف: يلتقط الأرقام التي تبدأ بـ 0 أو + وتتكون من 7-15 رقماً
+PHONE_PATTERN = re.compile(
+    r"(\+?\d{7,15})"
+)
 
 # ===================== التخزين المؤقت =====================
 warnings_db = {}
@@ -103,7 +107,6 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
         "❌ طرد بسبب عدم الموافقة": "⛔",
         "🤖 كابتشا - نجاح": "✅",
         "🤖 كابتشا - فشل": "❌",
-        "🛑 حساب جديد (ممنوع)": "🛑",
     }
     emoji = emoji_map.get(violation_type, "⚠️")
     log_message = (
@@ -198,12 +201,15 @@ async def send_captcha(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id
     keyboard = [[InlineKeyboardButton("🔄 تحديث الكابتشا", callback_data=f"refresh_captcha_{user_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # ✅ إرسال الكابتشا في المجموعة مباشرة (تجنب مشاكل الخاص)
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"🔐 {first_name}، أجب على الكابتشا التالية (اكتب الرقم فقط) في المجموعة:\n\n{question}\n\n⏳ لديك {AUTO_KICK_TIMEOUT} ثانية.",
         reply_markup=reply_markup
     )
+
+    if context.job_queue is None:
+        print("⚠️ job_queue غير مفعل!")
+        return
 
     job = context.job_queue.run_once(
         callback=kick_if_no_captcha,
@@ -347,7 +353,7 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
             )
 
 
-# ===================== الترحيب والوداع (معدل) =====================
+# ===================== الترحيب والوداع =====================
 
 async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -367,7 +373,6 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if await is_admin(context.bot, chat.id, user.id):
             continue
 
-        # ✅ تم إزالة فحص عمر الحساب لتجنب AttributeError
         await send_captcha(context, chat.id, user.id, user.first_name)
         await send_log(
             bot=context.bot,
@@ -656,12 +661,17 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_violation = False
     violation_type = "رابط غير مسموح"
 
+    # فحص المحفظة الرقمية
     if WALLET_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "محفظة رقمية"
+
+    # فحص رقم الهاتف
     elif not is_violation and PHONE_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "رقم هاتف"
+
+    # فحص الرابط
     elif not is_violation and LOCK_LINKS and LINK_PATTERN.search(cleaned_text):
         is_allowed = any(domain in cleaned_text.lower() for domain in ALLOWED_DOMAINS)
         if not is_allowed:
@@ -675,6 +685,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Delete error: {e}")
             return
 
+        # ✅ إرسال اللوج
         await send_log(
             bot=context.bot,
             user=user,
@@ -718,7 +729,8 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===================== تشغيل البوت =====================
 
 def main():
-    app = Application.builder().token(TOKEN).build()
+    # ✅ تفعيل job_queue بشكل صريح
+    app = Application.builder().token(TOKEN).job_queue().build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("warnings", warnings))
@@ -736,7 +748,7 @@ def main():
     app.add_handler(CallbackQueryHandler(refresh_captcha, pattern="^refresh_captcha_"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
 
-    print("🤖 Raskov Security Bot يعمل الآن مع الكابتشا في المجموعة...")
+    print("🤖 Raskov Security Bot يعمل الآن مع جميع الميزات...")
     app.run_polling()
 
 

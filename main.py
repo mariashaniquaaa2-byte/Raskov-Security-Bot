@@ -3,11 +3,12 @@ import re
 from datetime import datetime, timedelta
 import telegram
 
-from telegram import Update, ChatPermissions
+from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
@@ -16,18 +17,33 @@ from telegram.ext import (
 TOKEN = os.getenv("BOT_TOKEN")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 
+# ===================== القوانين =====================
+GROUP_RULES = (
+    "📜 <b>قوانين المجموعة</b> 📜\n\n"
+    "1️⃣ ممنوع نشر الروابط (ما عدا minepi.com و pi.app).\n"
+    "2️⃣ ممنوع نشر أرقام الهواتف أو المحافظ الرقمية.\n"
+    "3️⃣ ممنوع التكرار السريع للرسائل (سبام).\n"
+    "4️⃣ ممنوع نشر الصور أو الفيديوهات غير المفيدة.\n"
+    "5️⃣ احترام جميع الأعضاء، والابتعاد عن الشتائم.\n"
+    "6️⃣ التقيد بمواضيع المجموعة الأساسية.\n\n"
+    "⚠️ المخالفة = تحذير، والمخالفة الثالثة = حظر تلقائي.\n"
+    "👆 اضغط على زر 'موافق' لتأكيد قبولك القوانين."
+)
+
+AUTO_KICK_TIMEOUT = 60  # مدة الانتظار بالثواني قبل طرد العضو غير الموافق
+
 # ===================== القائمة البيضاء =====================
 ALLOWED_DOMAINS = ["minepi.com", "pi.app"]
 
 # ===================== إعدادات مانع التكرار =====================
-FLOOD_LIMIT = 5          # عدد الرسائل المسموح بها
-FLOOD_TIME = 4           # في خلال X ثواني
-MUTE_DURATION = 5        # مدة الكتم بالدقائق
+FLOOD_LIMIT = 5
+FLOOD_TIME = 4
+MUTE_DURATION = 5
 
 # ===================== إعدادات القفل =====================
-LOCK_LINKS = True        # مفعل افتراضياً
-LOCK_MEDIA = False       # غير مفعل افتراضياً
-LOCK_FORWARD = False     # غير مفعل افتراضياً
+LOCK_LINKS = True
+LOCK_MEDIA = False
+LOCK_FORWARD = False
 
 # ===================== الأنماط (Regex) =====================
 LINK_PATTERN = re.compile(
@@ -38,14 +54,14 @@ WALLET_PATTERN = re.compile(r"\b(0x[a-fA-F0-9]{40})\b", re.IGNORECASE)
 PHONE_PATTERN = re.compile(r"(?<![a-zA-Z])(\+?\d{7,15})(?![a-zA-Z])")
 
 # ===================== التخزين المؤقت =====================
-warnings_db = {}          # {user_id: count}
-user_messages = {}        # {user_id: [timestamps]}
+warnings_db = {}           # {user_id: count}
+user_messages = {}         # {user_id: [timestamps]}
+pending_approvals = {}     # {user_id: job_object} لتتبع الأعضاء الجدد
 
 
 # ===================== دوال المساعدة =====================
 
 async def is_admin(bot, chat_id, user_id):
-    """التحقق من صلاحيات المشرف"""
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         return member.status in ["administrator", "creator"]
@@ -54,33 +70,23 @@ async def is_admin(bot, chat_id, user_id):
 
 
 def clean_obfuscated_text(text: str) -> str:
-    """
-    تنظيف النص من محاولات إخفاء الروابط (مسافات، dot، حروف مشابهة)
-    """
-    # إزالة المسافات
     cleaned = re.sub(r'\s+', '', text)
-    # dot -> .
     cleaned = re.sub(r'dot', '.', cleaned, flags=re.IGNORECASE)
-    # at -> @
     cleaned = re.sub(r'at', '@', cleaned, flags=re.IGNORECASE)
-    # استبدال الأحرف المشابهة
     replacements = {
         '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's',
         '7': 't', '@': 'a', '¢': 'c', '₿': 'b'
     }
     for old, new in replacements.items():
         cleaned = cleaned.replace(old, new)
-    # hxxp -> http
     cleaned = re.sub(r'hxxps?', 'https', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'hxxp', 'http', cleaned, flags=re.IGNORECASE)
     return cleaned
 
 
 async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط"):
-    """إرسال تقرير إلى قناة اللوجات"""
     if not LOG_CHANNEL_ID:
         return
-
     time_now = datetime.now().strftime("%I:%M %p - %d/%m/%Y")
     emoji_map = {
         "رابط غير مسموح": "🚫",
@@ -92,9 +98,11 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
         "رسالة معاد توجيهها": "↩️",
         "⚠️ إدارة": "⚙️",
         "🔄 إعادة تعيين مخالفات": "🔄",
+        "👋 ترحيب": "👋",
+        "🚪 مغادرة": "🚪",
+        "❌ طرد بسبب عدم الموافقة": "⛔",
     }
     emoji = emoji_map.get(violation_type, "⚠️")
-
     log_message = (
         f"🕒 {time_now}\n"
         f"{emoji} <b>{violation_type}</b>\n"
@@ -103,7 +111,6 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
         f"🏠 المجموعة: {chat_title}\n"
         f"📝 التفاصيل:\n<code>{deleted_text[:150]}</code>"
     )
-
     try:
         await bot.send_message(chat_id=LOG_CHANNEL_ID, text=log_message, parse_mode="HTML")
     except Exception as e:
@@ -111,7 +118,6 @@ async def send_log(bot, user, chat_title, deleted_text, violation_type="رابط
 
 
 async def mute_user(bot, chat_id, user_id, duration_minutes):
-    """كتم مستخدم لمدة محددة"""
     try:
         until_date = datetime.now() + timedelta(minutes=duration_minutes)
         await bot.restrict_chat_member(
@@ -127,7 +133,6 @@ async def mute_user(bot, chat_id, user_id, duration_minutes):
 
 
 async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """فحص التكرار، وإذا تجاوز الحد يُكتم المستخدم"""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     now = datetime.now()
@@ -164,10 +169,202 @@ async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     return False
 
 
+# ===================== الترحيب والوداع =====================
+
+async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج انضمام الأعضاء الجدد"""
+    chat = update.effective_chat
+    chat_title = chat.title or "المجموعة"
+    
+    # التأكد من أن البوت مشرف في المجموعة
+    try:
+        bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
+        if bot_member.status not in ["administrator", "creator"]:
+            return
+    except:
+        return
+
+    for new_member in update.message.new_chat_members:
+        user = new_member
+        
+        # تجاهل انضمام البوت نفسه
+        if user.id == context.bot.id:
+            continue
+
+        # التحقق من أنه ليس مشرفاً (لا نطبق القوانين على المشرفين الجدد إن أمكن)
+        if await is_admin(context.bot, chat.id, user.id):
+            continue
+
+        # إنشاء أزرار الموافقة
+        keyboard = [
+            [InlineKeyboardButton("✅ أوافق على القوانين", callback_data=f"agree_rules_{user.id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # إرسال رسالة القوانين (خاصة بالعضو الجديد)
+        try:
+            # محاولة إرسالها في الخاص أولاً
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=GROUP_RULES,
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+            await update.message.reply_text(f"👋 مرحباً {user.first_name}! تم إرسال قوانين المجموعة إلى خاصك. يرجى الموافقة عليها.")
+        except:
+            # إذا كان العضو قد حظر البوت أو لا يستقبل خاص، نرسلها في المجموعة
+            msg = await context.bot.send_message(
+                chat_id=chat.id,
+                text=f"👋 مرحباً {user.first_name}!\n\n{GROUP_RULES}",
+                parse_mode="HTML",
+                reply_markup=reply_markup
+            )
+            # نثبت الرسالة (اختياري)
+            try:
+                await context.bot.pin_chat_message(chat.id, msg.message_id, disable_notification=True)
+            except:
+                pass
+
+        # تسجيل العضو في قائمة الانتظار للموافقة
+        # جدولة طرد العضو إذا لم يوافق خلال المدة المحددة
+        job = context.job_queue.run_once(
+            callback=kick_non_agreed,
+            when=AUTO_KICK_TIMEOUT,
+            data={"chat_id": chat.id, "user_id": user.id, "username": user.first_name},
+            name=f"kick_{user.id}"
+        )
+        pending_approvals[user.id] = job
+
+        # تسجيل في اللوجات
+        await send_log(
+            bot=context.bot,
+            user=user,
+            chat_title=chat_title,
+            deleted_text=f"انضم العضو. في انتظار الموافقة على القوانين ({AUTO_KICK_TIMEOUT} ثانية)",
+            violation_type="👋 ترحيب"
+        )
+
+
+async def kick_non_agreed(context: ContextTypes.DEFAULT_TYPE):
+    """طرد العضو الذي لم يوافق على القوانين بعد المهلة"""
+    data = context.job.data
+    chat_id = data["chat_id"]
+    user_id = data["user_id"]
+    username = data.get("username", f"ID:{user_id}")
+
+    # التأكد من أن العضو لا يزال في المجموعة ولم يوافق بعد
+    if user_id in pending_approvals:
+        try:
+            # طرد العضو
+            await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"⛔ {username} تم طرده تلقائياً لعدم موافقته على قوانين المجموعة خلال {AUTO_KICK_TIMEOUT} ثانية."
+            )
+            # تسجيل في اللوجات
+            await send_log(
+                bot=context.bot,
+                user=telegram.User(id=user_id, first_name=username, is_bot=False),
+                chat_title="المجموعة",
+                deleted_text=f"تم طرد {username} (ID: {user_id}) لعدم الموافقة على القوانين.",
+                violation_type="❌ طرد بسبب عدم الموافقة"
+            )
+            # إزالة من القائمة
+            del pending_approvals[user_id]
+        except Exception as e:
+            print(f"فشل طرد العضو {user_id}: {e}")
+
+
+async def handle_rules_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج الضغط على زر الموافقة على القوانين"""
+    query = update.callback_query
+    await query.answer()
+
+    # استخراج user_id من البيانات
+    data = query.data
+    if not data.startswith("agree_rules_"):
+        return
+
+    user_id = int(data.split("_")[2])
+    user = query.from_user
+
+    # التأكد من أن المستخدم الذي ضغط هو نفسه المستخدم الجديد
+    if user.id != user_id:
+        await query.edit_message_text("❌ هذا الزر ليس مخصصاً لك.")
+        return
+
+    # إلغاء مهمة الطرد المجدولة
+    if user_id in pending_approvals:
+        job = pending_approvals[user_id]
+        job.schedule_removal()  # إلغاء الطرد
+        del pending_approvals[user_id]
+
+        # تعديل الرسالة لإظهار التأكيد
+        await query.edit_message_text(
+            text=f"✅ {user.first_name}، تم تأكيد موافقتك على قوانين المجموعة!\nأهلاً وسهلاً بك 🎉",
+            parse_mode="HTML"
+        )
+
+        # إرسال رسالة ترحيب في المجموعة (اختياري)
+        chat_id = update.effective_chat.id
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"🎉 أهلاً وسهلاً بك {user.first_name} في المجموعة! استمتع بوقتك 🚀"
+        )
+
+        # إزالة تثبيت الرسالة إذا كانت مثبتة
+        try:
+            # نحاول إلغاء تثبيت الرسالة (اختياري)
+            await context.bot.unpin_chat_message(chat_id=chat_id)
+        except:
+            pass
+
+        # تسجيل في اللوجات
+        await send_log(
+            bot=context.bot,
+            user=user,
+            chat_title=update.effective_chat.title or "المجموعة",
+            deleted_text="وافق العضو على القوانين وانضم بنجاح.",
+            violation_type="👋 ترحيب (موافقة)"
+        )
+    else:
+        await query.edit_message_text("ℹ️ تمت الموافقة مسبقاً أو انتهت المهلة.")
+
+
+async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """معالج مغادرة الأعضاء"""
+    chat = update.effective_chat
+    chat_title = chat.title or "المجموعة"
+    user = update.message.left_chat_member
+
+    if user.id == context.bot.id:
+        return
+
+    # إرسال رسالة وداع
+    await context.bot.send_message(
+        chat_id=chat.id,
+        text=f"🚪 وداعاً {user.first_name}، نتمنى لك التوفيق! 🤍"
+    )
+
+    # حذف العضو من قائمة الانتظار إذا كان معلقاً (في حالة غادره قبل الموافقة)
+    if user.id in pending_approvals:
+        job = pending_approvals[user.id]
+        job.schedule_removal()
+        del pending_approvals[user.id]
+
+    # تسجيل في اللوجات
+    await send_log(
+        bot=context.bot,
+        user=user,
+        chat_title=chat_title,
+        deleted_text="غادر العضو المجموعة.",
+        violation_type="🚪 مغادرة"
+    )
+
+
 # ===================== أوامر المشرفين =====================
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """حظر عضو (بالرد على رسالته)"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
@@ -201,7 +398,6 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """فك حظر عضو باستخدام المعرف"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
@@ -230,7 +426,6 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def reset_warnings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إعادة تعيين مخالفات عضو (بالرد على رسالته)"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
@@ -304,12 +499,13 @@ async def toggle_lock_forward(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🛡️ <b>Raskov Security Bot v4.0</b>\n\n"
+        "🛡️ <b>Raskov Security Bot v5.0</b>\n\n"
         "🔹 <b>القائمة البيضاء</b>: minepi.com, pi.app\n"
         "🔹 <b>مانع التكرار</b>: 5 رسائل / 4 ثوان = كتم 5د\n"
         "🔹 <b>منع الروابط</b>: مفعل ✅\n"
         "🔹 <b>منع الميديا</b>: معطل ❌\n"
-        "🔹 <b>منع التوجيه</b>: معطل ❌\n\n"
+        "🔹 <b>منع التوجيه</b>: معطل ❌\n"
+        "🔹 <b>الترحيب</b>: مفعل ✅ (مع قوانين وموافقة)\n\n"
         "👑 <b>أوامر المشرفين</b>:\n"
         "/ban - رد على رسالة العضو\n"
         "/unban [ID]\n"
@@ -406,37 +602,30 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     original_text = update.message.text
-    cleaned_text = clean_obfuscated_text(original_text)  # تنظيف النص
+    cleaned_text = clean_obfuscated_text(original_text)
 
     is_violation = False
     violation_type = "رابط غير مسموح"
 
-    # 5a. محفظة رقمية
     if WALLET_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "محفظة رقمية"
-
-    # 5b. رقم هاتف
     elif not is_violation and PHONE_PATTERN.search(cleaned_text):
         is_violation = True
         violation_type = "رقم هاتف"
-
-    # 5c. رابط (مع مراعاة القفل والقائمة البيضاء)
-    if not is_violation and LOCK_LINKS and LINK_PATTERN.search(cleaned_text):
+    elif not is_violation and LOCK_LINKS and LINK_PATTERN.search(cleaned_text):
         is_allowed = any(domain in cleaned_text.lower() for domain in ALLOWED_DOMAINS)
         if not is_allowed:
             is_violation = True
             violation_type = "رابط غير مسموح" if original_text == cleaned_text else "رابط غير مسموح (ملتف)"
 
     if is_violation:
-        # حذف الرسالة
         try:
             await update.message.delete()
         except Exception as e:
             print(f"Delete error: {e}")
             return
 
-        # إرسال التقرير إلى اللوجات (مع النص الأصلي)
         await send_log(
             bot=context.bot,
             user=user,
@@ -445,7 +634,6 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             violation_type=violation_type
         )
 
-        # تحديث المخالفات
         warnings_db[user_id] = warnings_db.get(user_id, 0) + 1
         count = warnings_db[user_id]
 
@@ -479,6 +667,7 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===================== تشغيل البوت =====================
 
 def main():
+    # بناء التطبيق مع Job Queue (ضروري للطرد التلقائي)
     app = Application.builder().token(TOKEN).build()
 
     # أوامر المشرفين
@@ -494,10 +683,19 @@ def main():
     app.add_handler(CommandHandler("warnings", warnings))
     app.add_handler(CommandHandler("testlog", test_log))
 
+    # معالج الترحيب (انضمام أعضاء جدد)
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
+    
+    # معالج الوداع (مغادرة أعضاء)
+    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, goodbye_member))
+
+    # معالج ضغط الأزرار (الموافقة على القوانين)
+    app.add_handler(CallbackQueryHandler(handle_rules_approval, pattern="^agree_rules_"))
+
     # معالج جميع الرسائل (يأتي أخيراً)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
 
-    print("🤖 البوت يعمل الآن...")
+    print("🤖 البوت يعمل الآن مع الترحيب والوداع...")
     app.run_polling()
 
 

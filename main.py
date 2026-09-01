@@ -1202,5 +1202,18 @@ def main():
         "🤖 Raskov Security Bot يعمل عبر Webhook..."
     )
 
-    print(
-        f"
+        print(
+        f"🌐 URL: {RENDER_URL}"
+    )
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=webhook_path,
+        webhook_url=f"{RENDER_URL}/{webhook_path}",
+        drop_pending_updates=True
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -476,9 +476,18 @@ async def anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
 
-# ===================== تشغيل البوت =====================
+# ===================== تشغيل البوت على Render =====================
 
 def main():
+    PORT = int(os.environ.get("PORT", 10000))
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
+    if not TOKEN:
+        raise RuntimeError("❌ BOT_TOKEN غير مضبوط.")
+
+    if not RENDER_URL:
+        raise RuntimeError("❌ RENDER_EXTERNAL_URL غير مضبوط.")
+
     app = Application.builder().token(TOKEN).build()
 
     # أوامر المشرفين
@@ -494,11 +503,23 @@ def main():
     app.add_handler(CommandHandler("warnings", warnings))
     app.add_handler(CommandHandler("testlog", test_log))
 
-    # معالج جميع الرسائل (يأتي أخيراً)
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, anti_link))
+    # معالج جميع الرسائل
+    app.add_handler(
+        MessageHandler(filters.ALL & ~filters.COMMAND, anti_link)
+    )
 
-    print("🤖 البوت يعمل الآن...")
-    app.run_polling()
+    webhook_path = "telegram"
+
+    print("🤖 Raskov Security Bot يعمل عبر Webhook...")
+    print(f"🌐 URL: {RENDER_URL}")
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=webhook_path,
+        webhook_url=f"{RENDER_URL}/{webhook_path}",
+        drop_pending_updates=True
+    )
 
 
 if __name__ == "__main__":

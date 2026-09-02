@@ -263,7 +263,6 @@ async def new_member_handler(
     old_status = member_update.old_chat_member.status
     new_status = member_update.new_chat_member.status
 
-    # العضو أصبح عضوًا جديدًا
     joined_statuses = ["member", "restricted"]
 
     if new_status not in joined_statuses:
@@ -312,7 +311,7 @@ async def new_member_handler(
     ])
 
     try:
-        message = await context.bot.send_message(
+        await context.bot.send_message(
             chat_id=chat_id,
             text=(
                 f"👋 مرحبًا <b>{user.first_name}</b>!\n\n"
@@ -343,13 +342,11 @@ async def terms_callback(
 ):
     query = update.callback_query
 
-    await query.answer()
-
     data = query.data or ""
-
     parts = data.split(":")
 
     if len(parts) != 3:
+        await query.answer()
         return
 
     action = parts[0]
@@ -358,6 +355,7 @@ async def terms_callback(
         chat_id = int(parts[1])
         target_user_id = int(parts[2])
     except ValueError:
+        await query.answer()
         return
 
     user = query.from_user
@@ -369,6 +367,8 @@ async def terms_callback(
             show_alert=True
         )
         return
+
+    await query.answer()
 
     chat = await context.bot.get_chat(chat_id)
 
@@ -931,9 +931,7 @@ async def anti_link(
             bot=context.bot,
             user=user,
             chat_title=chat_title,
-            deleted_text=(
-                "[معاد توجيهها]"
-            ),
+            deleted_text="[معاد توجيهها]",
             violation_type="↩️ رسالة معاد توجيهها (ممنوع)"
         )
 
@@ -1196,6 +1194,10 @@ def main():
         )
     )
 
+    # =====================
+    # تشغيل Webhook
+    # =====================
+
     webhook_path = "telegram"
 
     print("🤖 Raskov Security Bot يعمل عبر Webhook...")
@@ -1206,6 +1208,7 @@ def main():
         port=PORT,
         url_path=webhook_path,
         webhook_url=f"{RENDER_URL}/{webhook_path}",
+        allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True
     )
 

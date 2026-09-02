@@ -1196,7 +1196,7 @@ def main():
         )
     )
 
-        webhook_path = "telegram"
+        webhook_path ="telegram"
 
     print("🤖 Raskov Security Bot يعمل عبر Webhook...")
     print(f"🌐 URL: {RENDER_URL}")

@@ -82,14 +82,12 @@ supabase: Client = create_client(
 
 
 # ============================================================
-# MEMORY CACHE
+# MEMORY
 # ============================================================
 
 flood_tracker = defaultdict(deque)
-
 raid_tracker = defaultdict(deque)
 
-# Temporary cache to reduce database requests
 settings_cache = {}
 
 SETTINGS_CACHE_SECONDS = 30
@@ -145,20 +143,8 @@ WALLET_PATTERN = re.compile(
     r"\b0x[a-fA-F0-9]{40}\b"
 )
 
-SOLANA_PATTERN = re.compile(
-    r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b"
-)
-
 PHONE_PATTERN = re.compile(
     r"(?<!\w)(?:\+?\d[\d\s().-]{7,}\d)(?!\w)"
-)
-
-OBFUSCATED_PATTERN = re.compile(
-    r"(?i)"
-    r"(https?\s*:\s*/\s*/|"
-    r"www\s*\.\s*|"
-    r"\b(?:dot|point)\b|"
-    r"\[\s*dot\s*\]|\(\s*dot\s*\)"
 )
 
 SCAM_KEYWORDS = [
@@ -231,7 +217,7 @@ def now_ts():
     return int(time.time())
 
 
-def clean_text(text: str) -> str:
+def clean_text(text):
     if not text:
         return ""
 
@@ -245,7 +231,7 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def normalize_text(text: str) -> str:
+def normalize_text(text):
     text = clean_text(text).lower()
 
     replacements = {
@@ -274,7 +260,7 @@ def get_user_display(user):
 
 
 # ============================================================
-# SUPABASE HELPERS
+# SUPABASE - GROUP
 # ============================================================
 
 def get_group(chat_id, chat_title=None, chat_username=None):
@@ -352,7 +338,9 @@ def update_setting(chat_id, key, value):
             .table("groups")
             .update({
                 key: value,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(
+                    timezone.utc
+                ).isoformat()
             })
             .eq("chat_id", chat_id)
             .execute()
@@ -363,9 +351,17 @@ def update_setting(chat_id, key, value):
         return True
 
     except Exception as e:
-        logger.exception("update_setting error: %s", e)
+        logger.exception(
+            "update_setting error: %s",
+            e
+        )
+
         return False
 
+
+# ============================================================
+# MEMBERS
+# ============================================================
 
 def ensure_member(chat_id, user):
     if not user:
@@ -382,7 +378,9 @@ def ensure_member(chat_id, user):
                     "username": user.username,
                     "first_name": user.first_name,
                     "last_name": user.last_name,
-                    "last_seen_at": datetime.now(timezone.utc).isoformat(),
+                    "last_seen_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
                 },
                 on_conflict="chat_id,user_id"
             )
@@ -390,7 +388,10 @@ def ensure_member(chat_id, user):
         )
 
     except Exception as e:
-        logger.warning("ensure_member error: %s", e)
+        logger.warning(
+            "ensure_member error: %s",
+            e
+        )
 
 
 def get_member(chat_id, user_id):
@@ -409,7 +410,10 @@ def get_member(chat_id, user_id):
             return result.data[0]
 
     except Exception as e:
-        logger.warning("get_member error: %s", e)
+        logger.warning(
+            "get_member error: %s",
+            e
+        )
 
     return None
 
@@ -420,7 +424,9 @@ def get_member(chat_id, user_id):
 
 def increment_stats(chat_id, field, amount=1):
     try:
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(
+            timezone.utc
+        ).date().isoformat()
 
         result = (
             supabase
@@ -435,14 +441,18 @@ def increment_stats(chat_id, field, amount=1):
         if result.data:
             row = result.data[0]
 
-            current = int(row.get(field, 0))
+            current = int(
+                row.get(field, 0)
+            )
 
             (
                 supabase
                 .table("statistics")
                 .update({
                     field: current + amount,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "updated_at": datetime.now(
+                        timezone.utc
+                    ).isoformat()
                 })
                 .eq("id", row["id"])
                 .execute()
@@ -463,10 +473,17 @@ def increment_stats(chat_id, field, amount=1):
             )
 
     except Exception as e:
-        logger.warning("increment_stats error: %s", e)
+        logger.warning(
+            "increment_stats error: %s",
+            e
+        )
 
 
-def update_group_counter(chat_id, field, amount=1):
+def update_group_counter(
+    chat_id,
+    field,
+    amount=1
+):
     try:
         result = (
             supabase
@@ -478,7 +495,9 @@ def update_group_counter(chat_id, field, amount=1):
         )
 
         if result.data:
-            current = int(result.data[0].get(field, 0))
+            current = int(
+                result.data[0].get(field, 0)
+            )
 
             (
                 supabase
@@ -486,12 +505,18 @@ def update_group_counter(chat_id, field, amount=1):
                 .update({
                     field: current + amount
                 })
-                .eq("chat_id", chat_id)
+                .eq(
+                    "chat_id",
+                    chat_id
+                )
                 .execute()
             )
 
     except Exception as e:
-        logger.warning("update_group_counter error: %s", e)
+        logger.warning(
+            "update_group_counter error: %s",
+            e
+        )
 
 
 # ============================================================
@@ -524,17 +549,17 @@ def log_security_event(
         )
 
     except Exception as e:
-        logger.warning("log_security_event error: %s", e)
+        logger.warning(
+            "log_security_event error: %s",
+            e
+        )
 
 
 # ============================================================
 # LOG CHANNEL
 # ============================================================
 
-async def send_log(
-    context,
-    text,
-):
+async def send_log(context, text):
     if not LOG_CHANNEL_ID:
         return
 
@@ -546,7 +571,10 @@ async def send_log(
         )
 
     except Exception as e:
-        logger.warning("Log channel error: %s", e)
+        logger.warning(
+            "Log channel error: %s",
+            e
+        )
 
 
 # ============================================================
@@ -554,7 +582,10 @@ async def send_log(
 # ============================================================
 
 async def is_admin(update, context):
-    if not update.effective_chat or not update.effective_user:
+    if (
+        not update.effective_chat
+        or not update.effective_user
+    ):
         return False
 
     try:
@@ -569,11 +600,19 @@ async def is_admin(update, context):
         )
 
     except Exception as e:
-        logger.warning("is_admin error: %s", e)
+        logger.warning(
+            "is_admin error: %s",
+            e
+        )
+
         return False
 
 
-async def is_user_admin(context, chat_id, user_id):
+async def is_user_admin(
+    context,
+    chat_id,
+    user_id
+):
     try:
         member = await context.bot.get_chat_member(
             chat_id,
@@ -590,7 +629,7 @@ async def is_user_admin(context, chat_id, user_id):
 
 
 # ============================================================
-# RESTRICT / UNRESTRICT
+# MUTE
 # ============================================================
 
 async def mute_user(
@@ -613,7 +652,10 @@ async def mute_user(
             can_add_web_page_previews=False,
         )
 
-        until_date = int(time.time()) + (minutes * 60)
+        until_date = (
+            int(time.time())
+            + minutes * 60
+        )
 
         await context.bot.restrict_chat_member(
             chat_id=chat_id,
@@ -625,7 +667,11 @@ async def mute_user(
         return True
 
     except Exception as e:
-        logger.warning("mute_user error: %s", e)
+        logger.warning(
+            "mute_user error: %s",
+            e
+        )
+
         return False
 
 
@@ -657,7 +703,11 @@ async def unmute_user(
         return True
 
     except Exception as e:
-        logger.warning("unmute_user error: %s", e)
+        logger.warning(
+            "unmute_user error: %s",
+            e
+        )
+
         return False
 
 
@@ -673,21 +723,36 @@ async def add_warning(
     message_id=None,
 ):
     try:
-        member = get_member(chat_id, user_id)
+        member = get_member(
+            chat_id,
+            user_id
+        )
 
         current_warnings = 0
 
         if member:
-            current_warnings = int(member.get("warnings", 0))
+            current_warnings = int(
+                member.get(
+                    "warnings",
+                    0
+                )
+            )
 
-        new_warnings = current_warnings + 1
-
-        settings = get_settings(
-            await context.bot.get_chat(chat_id)
+        new_warnings = (
+            current_warnings + 1
         )
 
+        chat = await context.bot.get_chat(
+            chat_id
+        )
+
+        settings = get_settings(chat)
+
         max_warnings = int(
-            settings.get("max_warnings", 3)
+            settings.get(
+                "max_warnings",
+                3
+            )
         )
 
         (
@@ -733,6 +798,7 @@ async def add_warning(
         )
 
         if new_warnings >= max_warnings:
+
             mute_minutes = int(
                 settings.get(
                     "warning_mute_minutes",
@@ -740,37 +806,51 @@ async def add_warning(
                 )
             )
 
-            await mute_user(
+            muted = await mute_user(
                 context,
                 chat_id,
                 user_id,
                 mute_minutes,
             )
 
-            (
-                supabase
-                .table("members")
-                .update(
-                    {
+            if muted:
+                (
+                    supabase
+                    .table("members")
+                    .update({
                         "is_muted": True
-                    }
+                    })
+                    .eq(
+                        "chat_id",
+                        chat_id
+                    )
+                    .eq(
+                        "user_id",
+                        user_id
+                    )
+                    .execute()
                 )
-                .eq("chat_id", chat_id)
-                .eq("user_id", user_id)
-                .execute()
-            )
 
-            update_group_counter(
-                chat_id,
-                "total_mutes",
-            )
+                increment_stats(
+                    chat_id,
+                    "mutes",
+                )
 
-            return new_warnings, True
+                update_group_counter(
+                    chat_id,
+                    "total_mutes",
+                )
+
+            return new_warnings, muted
 
         return new_warnings, False
 
     except Exception as e:
-        logger.exception("add_warning error: %s", e)
+        logger.exception(
+            "add_warning error: %s",
+            e
+        )
+
         return 0, False
 
 
@@ -786,7 +866,6 @@ def contains_link(text):
 
     return bool(
         URL_PATTERN.search(normalized)
-        or OBFUSCATED_PATTERN.search(normalized)
     )
 
 
@@ -798,11 +877,16 @@ def extract_domains(text):
 
     return [
         match.group(1).lower()
-        for match in DOMAIN_PATTERN.finditer(normalized)
+        for match in DOMAIN_PATTERN.finditer(
+            normalized
+        )
     ]
 
 
-def is_whitelisted_domain(domain, whitelist):
+def is_whitelisted_domain(
+    domain,
+    whitelist
+):
     domain = domain.lower().strip()
 
     default_allowed = [
@@ -810,12 +894,20 @@ def is_whitelisted_domain(domain, whitelist):
         "pi.app",
     ]
 
-    allowed = default_allowed + whitelist
+    allowed = (
+        default_allowed
+        + whitelist
+    )
 
     for item in allowed:
         item = item.lower().strip()
 
-        if domain == item or domain.endswith("." + item):
+        if (
+            domain == item
+            or domain.endswith(
+                "." + item
+            )
+        ):
             return True
 
     return False
@@ -827,10 +919,6 @@ def contains_wallet(text):
 
     return bool(
         WALLET_PATTERN.search(text)
-        or (
-            len(text) < 1000
-            and SOLANA_PATTERN.search(text)
-        )
     )
 
 
@@ -841,7 +929,11 @@ def contains_phone(text):
     matches = PHONE_PATTERN.findall(text)
 
     for match in matches:
-        digits = re.sub(r"\D", "", match)
+        digits = re.sub(
+            r"\D",
+            "",
+            match
+        )
 
         if 8 <= len(digits) <= 15:
             return True
@@ -856,7 +948,8 @@ def contains_scam(text):
     normalized = normalize_text(text)
 
     return any(
-        keyword.lower() in normalized
+        keyword.lower()
+        in normalized
         for keyword in SCAM_KEYWORDS
     )
 
@@ -868,7 +961,8 @@ def contains_ad(text):
     normalized = normalize_text(text)
 
     return any(
-        keyword.lower() in normalized
+        keyword.lower()
+        in normalized
         for keyword in AD_KEYWORDS
     )
 
@@ -892,11 +986,18 @@ def is_forwarded(message):
     if not message:
         return False
 
-    if getattr(message, "forward_origin", None):
+    if getattr(
+        message,
+        "forward_origin",
+        None
+    ):
         return True
 
-    # Compatibility with older Telegram/PTB versions
-    if getattr(message, "forward_date", None):
+    if getattr(
+        message,
+        "forward_date",
+        None
+    ):
         return True
 
     return False
@@ -912,13 +1013,18 @@ def get_whitelist(chat_id):
             supabase
             .table("whitelist_domains")
             .select("domain")
-            .eq("chat_id", chat_id)
+            .eq(
+                "chat_id",
+                chat_id
+            )
             .execute()
         )
 
         return [
             row["domain"]
-            for row in (result.data or [])
+            for row in (
+                result.data or []
+            )
         ]
 
     except Exception:
@@ -929,40 +1035,57 @@ def get_whitelist(chat_id):
 # SECURITY SCORE
 # ============================================================
 
-def calculate_security_score(settings):
+def calculate_security_score(
+    settings
+):
     score = 0
 
-    if settings.get("lock_links"):
+    if settings.get(
+        "lock_links"
+    ):
         score += 15
 
-    if settings.get("lock_ads"):
+    if settings.get(
+        "lock_ads"
+    ):
         score += 10
 
-    if settings.get("lock_wallets"):
+    if settings.get(
+        "lock_wallets"
+    ):
         score += 10
 
-    if settings.get("anti_spam"):
+    if settings.get(
+        "anti_spam"
+    ):
         score += 15
 
-    if settings.get("anti_raid"):
+    if settings.get(
+        "anti_raid"
+    ):
         score += 15
 
-    if settings.get("lock_forward"):
+    if settings.get(
+        "lock_forward"
+    ):
         score += 10
 
-    if settings.get("lock_media"):
+    if settings.get(
+        "lock_media"
+    ):
         score += 5
 
-    if settings.get("lock_phone_numbers"):
+    if settings.get(
+        "lock_phone_numbers"
+    ):
         score += 5
 
-    if settings.get("require_terms"):
+    if settings.get(
+        "require_terms"
+    ):
         score += 10
 
-    if score > 100:
-        score = 100
-
-    return score
+    return min(score, 100)
 
 
 def security_level(score):
@@ -979,11 +1102,16 @@ def security_level(score):
 
 
 # ============================================================
-# UPDATE SECURITY SCORE
+# SAVE SCORE
 # ============================================================
 
-def save_security_score(chat_id, settings):
-    score = calculate_security_score(settings)
+def save_security_score(
+    chat_id,
+    settings
+):
+    score = calculate_security_score(
+        settings
+    )
 
     try:
         (
@@ -992,7 +1120,10 @@ def save_security_score(chat_id, settings):
             .update({
                 "security_score": score
             })
-            .eq("chat_id", chat_id)
+            .eq(
+                "chat_id",
+                chat_id
+            )
             .execute()
         )
 
@@ -1003,10 +1134,13 @@ def save_security_score(chat_id, settings):
 
 
 # ============================================================
-# RAID SYSTEM
+# NEW MEMBER / ANTI RAID
 # ============================================================
 
-async def process_new_member(update, context):
+async def process_new_member(
+    update,
+    context
+):
     chat_member = update.chat_member
 
     if not chat_member:
@@ -1014,12 +1148,23 @@ async def process_new_member(update, context):
 
     chat = chat_member.chat
 
-    old_status = chat_member.old_chat_member.status
-    new_status = chat_member.new_chat_member.status
+    old_status = (
+        chat_member
+        .old_chat_member
+        .status
+    )
 
-    # Only new joins
+    new_status = (
+        chat_member
+        .new_chat_member
+        .status
+    )
+
     joined = (
-        old_status in ("left", "kicked")
+        old_status in (
+            "left",
+            "kicked",
+        )
         and new_status in (
             "member",
             "restricted",
@@ -1029,13 +1174,19 @@ async def process_new_member(update, context):
     if not joined:
         return
 
-    user = chat_member.new_chat_member.user
+    user = (
+        chat_member
+        .new_chat_member
+        .user
+    )
 
-    settings = get_settings(chat)
+    settings = get_settings(
+        chat
+    )
 
     ensure_member(
         chat.id,
-        user,
+        user
     )
 
     update_group_counter(
@@ -1048,15 +1199,20 @@ async def process_new_member(update, context):
         "joins",
     )
 
-    # --------------------------------------------------------
-    # Anti-Raid
-    # --------------------------------------------------------
+    # ========================================================
+    # ANTI RAID
+    # ========================================================
 
-    if settings.get("anti_raid", True):
+    if settings.get(
+        "anti_raid",
+        True
+    ):
 
         current = time.time()
 
-        tracker = raid_tracker[chat.id]
+        tracker = raid_tracker[
+            chat.id
+        ]
 
         tracker.append(current)
 
@@ -1068,7 +1224,8 @@ async def process_new_member(update, context):
         )
 
         while tracker and (
-            current - tracker[0] > window
+            current - tracker[0]
+            > window
         ):
             tracker.popleft()
 
@@ -1096,7 +1253,9 @@ async def process_new_member(update, context):
                 "anti_raid_triggered",
                 severity="high",
                 details={
-                    "join_count": len(tracker),
+                    "join_count": len(
+                        tracker
+                    ),
                     "window_seconds": window,
                 },
             )
@@ -1106,13 +1265,12 @@ async def process_new_member(update, context):
                 (
                     "🚨 RASKOV ANTI-RAID\n\n"
                     f"Group: {chat.title}\n"
-                    f"Joins detected: {len(tracker)}\n"
+                    f"Joins: {len(tracker)}\n"
                     f"Window: {window}s\n"
                     "Status: PROTECTION TRIGGERED"
                 )
             )
 
-            # Restrict the new member
             raid_minutes = int(
                 settings.get(
                     "raid_lock_minutes",
@@ -1127,11 +1285,14 @@ async def process_new_member(update, context):
                 raid_minutes,
             )
 
-    # --------------------------------------------------------
-    # Terms
-    # --------------------------------------------------------
+    # ========================================================
+    # TERMS
+    # ========================================================
 
-    if settings.get("require_terms", True):
+    if settings.get(
+        "require_terms",
+        True
+    ):
 
         try:
             permissions = ChatPermissions(
@@ -1158,13 +1319,21 @@ async def process_new_member(update, context):
                     [
                         InlineKeyboardButton(
                             "✅ أوافق على الشروط",
-                            callback_data=f"terms_accept:{chat.id}:{user.id}",
+                            callback_data=(
+                                f"terms_accept:"
+                                f"{chat.id}:"
+                                f"{user.id}"
+                            ),
                         )
                     ],
                     [
                         InlineKeyboardButton(
                             "❌ لا أوافق",
-                            callback_data=f"terms_reject:{chat.id}:{user.id}",
+                            callback_data=(
+                                f"terms_reject:"
+                                f"{chat.id}:"
+                                f"{user.id}"
+                            ),
                         )
                     ],
                 ]
@@ -1176,7 +1345,8 @@ async def process_new_member(update, context):
             )
 
             welcome = (
-                f"👋 مرحبًا {get_user_display(user)}\n\n"
+                f"👋 مرحبًا "
+                f"{get_user_display(user)}\n\n"
                 f"{terms}\n\n"
                 "👇 اختر أحد الخيارات:"
             )
@@ -1189,15 +1359,18 @@ async def process_new_member(update, context):
 
         except Exception as e:
             logger.warning(
-                "Terms restriction error: %s",
+                "Terms error: %s",
                 e
             )
 
-    # --------------------------------------------------------
-    # Welcome
-    # --------------------------------------------------------
+    # ========================================================
+    # WELCOME
+    # ========================================================
 
-    elif settings.get("welcome_enabled", True):
+    elif settings.get(
+        "welcome_enabled",
+        True
+    ):
 
         try:
             template = settings.get(
@@ -1205,12 +1378,16 @@ async def process_new_member(update, context):
                 "👋 مرحبًا بك {name} في {group}!"
             )
 
-            text = template.replace(
-                "{name}",
-                get_user_display(user)
-            ).replace(
-                "{group}",
-                chat.title or "المجموعة"
+            text = (
+                template
+                .replace(
+                    "{name}",
+                    get_user_display(user)
+                )
+                .replace(
+                    "{group}",
+                    chat.title or "المجموعة"
+                )
             )
 
             await context.bot.send_message(
@@ -1226,14 +1403,15 @@ async def process_new_member(update, context):
 # TERMS CALLBACK
 # ============================================================
 
-async def terms_callback(update, context):
+async def terms_callback(
+    update,
+    context
+):
     query = update.callback_query
 
     await query.answer()
 
-    data = query.data
-
-    parts = data.split(":")
+    parts = query.data.split(":")
 
     if len(parts) != 3:
         return
@@ -1248,7 +1426,6 @@ async def terms_callback(update, context):
 
     user = query.from_user
 
-    # Only the member concerned can accept
     if user.id != target_user_id:
 
         await query.answer(
@@ -1281,6 +1458,7 @@ async def terms_callback(update, context):
                         "terms_accepted_at": datetime.now(
                             timezone.utc
                         ).isoformat(),
+                        "is_muted": False,
                     },
                     on_conflict="chat_id,user_id"
                 )
@@ -1289,7 +1467,7 @@ async def terms_callback(update, context):
 
         except Exception as e:
             logger.warning(
-                "terms_accept DB error: %s",
+                "Terms DB error: %s",
                 e
             )
 
@@ -1324,10 +1502,13 @@ async def terms_callback(update, context):
 
 
 # ============================================================
-# MESSAGE MODERATION
+# MODERATION
 # ============================================================
 
-async def moderate_message(update, context):
+async def moderate_message(
+    update,
+    context
+):
     message = update.message
 
     if not message:
@@ -1339,7 +1520,6 @@ async def moderate_message(update, context):
     if not chat or not user:
         return
 
-    # Ignore private chats
     if chat.type not in (
         "group",
         "supergroup",
@@ -1348,14 +1528,16 @@ async def moderate_message(update, context):
 
     ensure_member(
         chat.id,
-        user,
+        user
     )
 
-    settings = get_settings(chat)
+    settings = get_settings(
+        chat
+    )
 
-    # --------------------------------------------------------
-    # Admin bypass
-    # --------------------------------------------------------
+    # ========================================================
+    # ADMIN BYPASS
+    # ========================================================
 
     if await is_user_admin(
         context,
@@ -1364,9 +1546,9 @@ async def moderate_message(update, context):
     ):
         return
 
-    # --------------------------------------------------------
-    # Statistics
-    # --------------------------------------------------------
+    # ========================================================
+    # STATISTICS
+    # ========================================================
 
     increment_stats(
         chat.id,
@@ -1378,15 +1560,22 @@ async def moderate_message(update, context):
         "total_messages",
     )
 
-    text = message.text or message.caption or ""
+    text = (
+        message.text
+        or message.caption
+        or ""
+    )
 
     clean = clean_text(text)
 
-    # --------------------------------------------------------
-    # Anti-Flood
-    # --------------------------------------------------------
+    # ========================================================
+    # ANTI SPAM
+    # ========================================================
 
-    if settings.get("anti_spam", True):
+    if settings.get(
+        "anti_spam",
+        True
+    ):
 
         current = time.time()
 
@@ -1414,7 +1603,8 @@ async def moderate_message(update, context):
         )
 
         while tracker and (
-            current - tracker[0] > window
+            current - tracker[0]
+            > window
         ):
             tracker.popleft()
 
@@ -1432,7 +1622,7 @@ async def moderate_message(update, context):
             except Exception:
                 pass
 
-            await mute_user(
+            muted = await mute_user(
                 context,
                 chat.id,
                 user.id,
@@ -1451,9 +1641,19 @@ async def moderate_message(update, context):
 
             update_group_counter(
                 chat.id,
-                "total_deleted_messages"
-                if False else "deleted_messages"
+                "deleted_messages",
             )
+
+            if muted:
+                increment_stats(
+                    chat.id,
+                    "mutes",
+                )
+
+                update_group_counter(
+                    chat.id,
+                    "total_mutes",
+                )
 
             log_security_event(
                 chat.id,
@@ -1462,7 +1662,9 @@ async def moderate_message(update, context):
                 severity="high",
                 message_id=message.message_id,
                 details={
-                    "message_count": len(tracker),
+                    "message_count": len(
+                        tracker
+                    ),
                     "window": window,
                 },
             )
@@ -1482,12 +1684,15 @@ async def moderate_message(update, context):
 
             return
 
-    # --------------------------------------------------------
-    # Media Lock
-    # --------------------------------------------------------
+    # ========================================================
+    # MEDIA LOCK
+    # ========================================================
 
     if (
-        settings.get("lock_media", False)
+        settings.get(
+            "lock_media",
+            False
+        )
         and contains_media(message)
     ):
 
@@ -1497,6 +1702,11 @@ async def moderate_message(update, context):
             pass
 
         increment_stats(
+            chat.id,
+            "deleted_messages",
+        )
+
+        update_group_counter(
             chat.id,
             "deleted_messages",
         )
@@ -1511,12 +1721,15 @@ async def moderate_message(update, context):
 
         return
 
-    # --------------------------------------------------------
-    # Forward Lock
-    # --------------------------------------------------------
+    # ========================================================
+    # FORWARD LOCK
+    # ========================================================
 
     if (
-        settings.get("lock_forward", False)
+        settings.get(
+            "lock_forward",
+            False
+        )
         and is_forwarded(message)
     ):
 
@@ -1526,6 +1739,11 @@ async def moderate_message(update, context):
             pass
 
         increment_stats(
+            chat.id,
+            "deleted_messages",
+        )
+
+        update_group_counter(
             chat.id,
             "deleted_messages",
         )
@@ -1549,9 +1767,9 @@ async def moderate_message(update, context):
 
         return
 
-    # --------------------------------------------------------
-    # Scam Detection
-    # --------------------------------------------------------
+    # ========================================================
+    # ANTI SCAM
+    # ========================================================
 
     if contains_scam(clean):
 
@@ -1569,6 +1787,11 @@ async def moderate_message(update, context):
         )
 
         increment_stats(
+            chat.id,
+            "deleted_messages",
+        )
+
+        update_group_counter(
             chat.id,
             "deleted_messages",
         )
@@ -1592,18 +1815,22 @@ async def moderate_message(update, context):
                 f"User: {get_user_display(user)}\n"
                 f"ID: {user.id}\n"
                 f"Warnings: {warnings}\n"
-                f"Muted: {'YES' if muted else 'NO'}"
+                f"Muted: "
+                f"{'YES' if muted else 'NO'}"
             )
         )
 
         return
 
-    # --------------------------------------------------------
-    # Wallet Detection
-    # --------------------------------------------------------
+    # ========================================================
+    # WALLET
+    # ========================================================
 
     if (
-        settings.get("lock_wallets", True)
+        settings.get(
+            "lock_wallets",
+            True
+        )
         and contains_wallet(clean)
     ):
 
@@ -1630,6 +1857,11 @@ async def moderate_message(update, context):
             "deleted_messages",
         )
 
+        update_group_counter(
+            chat.id,
+            "deleted_messages",
+        )
+
         log_security_event(
             chat.id,
             "wallet_blocked",
@@ -1649,12 +1881,15 @@ async def moderate_message(update, context):
 
         return
 
-    # --------------------------------------------------------
-    # Phone Detection
-    # --------------------------------------------------------
+    # ========================================================
+    # PHONE
+    # ========================================================
 
     if (
-        settings.get("lock_phone_numbers", False)
+        settings.get(
+            "lock_phone_numbers",
+            False
+        )
         and contains_phone(clean)
     ):
 
@@ -1681,6 +1916,11 @@ async def moderate_message(update, context):
             "deleted_messages",
         )
 
+        update_group_counter(
+            chat.id,
+            "deleted_messages",
+        )
+
         log_security_event(
             chat.id,
             "phone_blocked",
@@ -1691,12 +1931,15 @@ async def moderate_message(update, context):
 
         return
 
-    # --------------------------------------------------------
-    # Advertisement Detection
-    # --------------------------------------------------------
+    # ========================================================
+    # ADVERTISEMENT
+    # ========================================================
 
     if (
-        settings.get("lock_ads", True)
+        settings.get(
+            "lock_ads",
+            True
+        )
         and contains_ad(clean)
     ):
 
@@ -1723,6 +1966,11 @@ async def moderate_message(update, context):
             "deleted_messages",
         )
 
+        update_group_counter(
+            chat.id,
+            "deleted_messages",
+        )
+
         log_security_event(
             chat.id,
             "advertisement_blocked",
@@ -1742,12 +1990,15 @@ async def moderate_message(update, context):
 
         return
 
-    # --------------------------------------------------------
-    # Link Protection
-    # --------------------------------------------------------
+    # ========================================================
+    # LINK PROTECTION
+    # ========================================================
 
     if (
-        settings.get("lock_links", True)
+        settings.get(
+            "lock_links",
+            True
+        )
         and contains_link(clean)
     ):
 
@@ -1755,7 +2006,9 @@ async def moderate_message(update, context):
             chat.id
         )
 
-        domains = extract_domains(clean)
+        domains = extract_domains(
+            clean
+        )
 
         allowed = False
 
@@ -1793,6 +2046,11 @@ async def moderate_message(update, context):
                 "deleted_messages",
             )
 
+            update_group_counter(
+                chat.id,
+                "deleted_messages",
+            )
+
             log_security_event(
                 chat.id,
                 "link_blocked",
@@ -1809,7 +2067,8 @@ async def moderate_message(update, context):
                 (
                     "🔗 LINK BLOCKED\n\n"
                     f"User: {get_user_display(user)}\n"
-                    f"Domains: {', '.join(domains) or 'hidden'}\n"
+                    f"Domains: "
+                    f"{', '.join(domains) or 'hidden'}\n"
                     f"Warnings: {warnings}"
                 )
             )
@@ -1818,58 +2077,72 @@ async def moderate_message(update, context):
 
 
 # ============================================================
-# PANEL
+# ADMIN PANEL
 # ============================================================
 
 def panel_keyboard(settings):
+
     def status(value):
-        return "🟢 ON" if value else "🔴 OFF"
+        return (
+            "🟢 ON"
+            if value
+            else "🔴 OFF"
+        )
 
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    f"🔗 الروابط {status(settings.get('lock_links'))}",
+                    f"🔗 الروابط "
+                    f"{status(settings.get('lock_links'))}",
                     callback_data="toggle:links",
                 ),
                 InlineKeyboardButton(
-                    f"📢 الإعلانات {status(settings.get('lock_ads'))}",
+                    f"📢 الإعلانات "
+                    f"{status(settings.get('lock_ads'))}",
                     callback_data="toggle:ads",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    f"🌊 Anti-Spam {status(settings.get('anti_spam'))}",
+                    f"🌊 Anti-Spam "
+                    f"{status(settings.get('anti_spam'))}",
                     callback_data="toggle:spam",
                 ),
                 InlineKeyboardButton(
-                    f"⚔️ Anti-Raid {status(settings.get('anti_raid'))}",
+                    f"⚔️ Anti-Raid "
+                    f"{status(settings.get('anti_raid'))}",
                     callback_data="toggle:raid",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    f"💰 Wallet {status(settings.get('lock_wallets'))}",
+                    f"💰 Wallet "
+                    f"{status(settings.get('lock_wallets'))}",
                     callback_data="toggle:wallet",
                 ),
                 InlineKeyboardButton(
-                    f"📱 Phone {status(settings.get('lock_phone_numbers'))}",
+                    f"📱 Phone "
+                    f"{status(settings.get('lock_phone_numbers'))}",
                     callback_data="toggle:phone",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    f"🔁 Forward {status(settings.get('lock_forward'))}",
+                    f"🔁 Forward "
+                    f"{status(settings.get('lock_forward'))}",
                     callback_data="toggle:forward",
                 ),
                 InlineKeyboardButton(
-                    f"🖼️ Media {status(settings.get('lock_media'))}",
+                    f"🖼️ Media "
+                    f"{status(settings.get('lock_media'))}",
                     callback_data="toggle:media",
                 ),
             ],
             [
                 InlineKeyboardButton(
-                    f"📜 الشروط {status(settings.get('require_terms'))}",
+                    f"📜 الشروط "
+                    f"{status(settings.get('require_terms'))}",
                     callback_data="toggle:terms",
                 ),
             ],
@@ -1897,22 +2170,35 @@ def panel_keyboard(settings):
     )
 
 
-def panel_text(chat, settings):
-    score = calculate_security_score(settings)
+def panel_text(
+    chat,
+    settings
+):
+    score = calculate_security_score(
+        settings
+    )
 
     return (
         "🛡️ RASKOV SECURITY PANEL V6.0\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"🏠 المجموعة: {chat.title}\n"
         f"🆔 Chat ID: {chat.id}\n\n"
-        f"🔐 مستوى الأمان: {security_level(score)}\n"
-        f"🎯 Security Score: {score}/100\n\n"
+        f"🔐 مستوى الأمان: "
+        f"{security_level(score)}\n"
+        f"🎯 Security Score: "
+        f"{score}/100\n\n"
         "اختر نظام الحماية الذي تريد التحكم فيه:"
     )
 
 
-async def panel_command(update, context):
-    if not await is_admin(update, context):
+async def panel_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ هذا الأمر مخصص للمشرفين فقط."
         )
@@ -1920,11 +2206,13 @@ async def panel_command(update, context):
 
     chat = update.effective_chat
 
-    settings = get_settings(chat)
+    settings = get_settings(
+        chat
+    )
 
     save_security_score(
         chat.id,
-        settings,
+        settings
     )
 
     await update.message.reply_text(
@@ -1942,14 +2230,14 @@ async def panel_command(update, context):
 # PANEL CALLBACK
 # ============================================================
 
-async def panel_callback(update, context):
+async def panel_callback(
+    update,
+    context
+):
     query = update.callback_query
-
-    await query.answer()
 
     chat_id = query.message.chat.id
 
-    # Check admin
     if not await is_user_admin(
         context,
         chat_id,
@@ -1961,14 +2249,18 @@ async def panel_callback(update, context):
         )
         return
 
+    await query.answer()
+
     chat = query.message.chat
 
-    settings = get_settings(chat)
+    settings = get_settings(
+        chat
+    )
 
     data = query.data
 
     # --------------------------------------------------------
-    # Close
+    # CLOSE
     # --------------------------------------------------------
 
     if data == "close":
@@ -1983,17 +2275,24 @@ async def panel_callback(update, context):
         return
 
     # --------------------------------------------------------
-    # Refresh
+    # REFRESH
     # --------------------------------------------------------
 
     if data == "refresh":
 
-        settings = get_settings(chat)
+        settings = get_settings(
+            chat
+        )
 
         try:
             await query.edit_message_text(
-                panel_text(chat, settings),
-                reply_markup=panel_keyboard(settings),
+                panel_text(
+                    chat,
+                    settings
+                ),
+                reply_markup=panel_keyboard(
+                    settings
+                ),
             )
         except Exception:
             pass
@@ -2001,7 +2300,7 @@ async def panel_callback(update, context):
         return
 
     # --------------------------------------------------------
-    # Security Score
+    # SECURITY SCORE
     # --------------------------------------------------------
 
     if data == "score":
@@ -2013,9 +2312,10 @@ async def panel_callback(update, context):
         text = (
             "🛡️ RASKOV SECURITY SCORE\n\n"
             f"🎯 Score: {score}/100\n"
-            f"📊 Level: {security_level(score)}\n\n"
-            "كلما زادت أنظمة الحماية المفعلة، "
-            "ارتفع مستوى الأمان."
+            f"📊 Level: "
+            f"{security_level(score)}\n\n"
+            "كلما زادت أنظمة الحماية "
+            "المفعلة، ارتفع مستوى الأمان."
         )
 
         keyboard = InlineKeyboardMarkup(
@@ -2037,7 +2337,7 @@ async def panel_callback(update, context):
         return
 
     # --------------------------------------------------------
-    # Statistics
+    # STATISTICS
     # --------------------------------------------------------
 
     if data == "stats":
@@ -2051,8 +2351,14 @@ async def panel_callback(update, context):
                 supabase
                 .table("statistics")
                 .select("*")
-                .eq("chat_id", chat_id)
-                .eq("stat_date", today)
+                .eq(
+                    "chat_id",
+                    chat_id
+                )
+                .eq(
+                    "stat_date",
+                    today
+                )
                 .limit(1)
                 .execute()
             )
@@ -2066,18 +2372,30 @@ async def panel_callback(update, context):
             text = (
                 "📊 RASKOV STATISTICS\n"
                 "━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"💬 Messages: {stats.get('messages', 0)}\n"
-                f"🗑️ Deleted: {stats.get('deleted_messages', 0)}\n"
-                f"⚠️ Warnings: {stats.get('warnings', 0)}\n"
-                f"🚫 Bans: {stats.get('bans', 0)}\n"
-                f"🔇 Mutes: {stats.get('mutes', 0)}\n"
-                f"👥 Joins: {stats.get('joins', 0)}\n"
-                f"🔗 Links blocked: {stats.get('links_blocked', 0)}\n"
-                f"📢 Ads blocked: {stats.get('ads_blocked', 0)}\n"
-                f"🌊 Spam blocked: {stats.get('spam_blocked', 0)}\n"
-                f"💰 Wallets blocked: {stats.get('wallets_blocked', 0)}\n"
-                f"📱 Phones blocked: {stats.get('phone_numbers_blocked', 0)}\n"
-                f"⚔️ Raid events: {stats.get('raid_events', 0)}"
+                f"💬 Messages: "
+                f"{stats.get('messages', 0)}\n"
+                f"🗑️ Deleted: "
+                f"{stats.get('deleted_messages', 0)}\n"
+                f"⚠️ Warnings: "
+                f"{stats.get('warnings', 0)}\n"
+                f"🚫 Bans: "
+                f"{stats.get('bans', 0)}\n"
+                f"🔇 Mutes: "
+                f"{stats.get('mutes', 0)}\n"
+                f"👥 Joins: "
+                f"{stats.get('joins', 0)}\n"
+                f"🔗 Links blocked: "
+                f"{stats.get('links_blocked', 0)}\n"
+                f"📢 Ads blocked: "
+                f"{stats.get('ads_blocked', 0)}\n"
+                f"🌊 Spam blocked: "
+                f"{stats.get('spam_blocked', 0)}\n"
+                f"💰 Wallets blocked: "
+                f"{stats.get('wallets_blocked', 0)}\n"
+                f"📱 Phones blocked: "
+                f"{stats.get('phone_numbers_blocked', 0)}\n"
+                f"⚔️ Raid events: "
+                f"{stats.get('raid_events', 0)}"
             )
 
         except Exception:
@@ -2104,7 +2422,7 @@ async def panel_callback(update, context):
         return
 
     # --------------------------------------------------------
-    # Toggles
+    # TOGGLES
     # --------------------------------------------------------
 
     toggle_map = {
@@ -2147,7 +2465,8 @@ async def panel_callback(update, context):
                 chat
             )
 
-            score = calculate_security_score(
+            save_security_score(
+                chat_id,
                 settings
             )
 
@@ -2172,7 +2491,10 @@ async def panel_callback(update, context):
                 details={
                     "setting": key,
                     "value": new_value,
-                    "security_score": score,
+                    "security_score":
+                        calculate_security_score(
+                            settings
+                        ),
                 },
             )
 
@@ -2183,7 +2505,10 @@ async def panel_callback(update, context):
 # /START
 # ============================================================
 
-async def start_command(update, context):
+async def start_command(
+    update,
+    context
+):
     text = (
         "🛡️ RASKOV SECURITY BOT V6.0\n\n"
         "نظام حماية متقدم لمجموعات Telegram.\n\n"
@@ -2212,23 +2537,32 @@ async def start_command(update, context):
 # /WARNINGS
 # ============================================================
 
-async def warnings_command(update, context):
+async def warnings_command(
+    update,
+    context
+):
     chat = update.effective_chat
     user = update.effective_user
 
     member = get_member(
         chat.id,
-        user.id,
+        user.id
     )
 
     warnings = (
-        int(member.get("warnings", 0))
+        int(
+            member.get(
+                "warnings",
+                0
+            )
+        )
         if member
         else 0
     )
 
     await update.message.reply_text(
-        f"⚠️ تحذيراتك الحالية: {warnings}"
+        f"⚠️ تحذيراتك الحالية: "
+        f"{warnings}"
     )
 
 
@@ -2236,8 +2570,14 @@ async def warnings_command(update, context):
 # /TESTLOG
 # ============================================================
 
-async def testlog_command(update, context):
-    if not await is_admin(update, context):
+async def testlog_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2245,10 +2585,13 @@ async def testlog_command(update, context):
 
     await send_log(
         context,
-        "🧪 Raskov V6.0 Log Test\n\n"
-        "✅ Supabase\n"
-        "✅ Webhook\n"
-        "✅ Logging"
+        (
+            "🧪 RASKOV V6.0 LOG TEST\n\n"
+            "✅ Supabase\n"
+            "✅ Webhook\n"
+            "✅ Logging\n"
+            "✅ Security System"
+        )
     )
 
     await update.message.reply_text(
@@ -2260,8 +2603,14 @@ async def testlog_command(update, context):
 # /LOCKLINKS
 # ============================================================
 
-async def locklinks_command(update, context):
-    if not await is_admin(update, context):
+async def locklinks_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2284,8 +2633,14 @@ async def locklinks_command(update, context):
 # /LOCKMEDIA
 # ============================================================
 
-async def lockmedia_command(update, context):
-    if not await is_admin(update, context):
+async def lockmedia_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2308,8 +2663,14 @@ async def lockmedia_command(update, context):
 # /LOCKFORWARD
 # ============================================================
 
-async def lockforward_command(update, context):
-    if not await is_admin(update, context):
+async def lockforward_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2332,8 +2693,14 @@ async def lockforward_command(update, context):
 # /BAN
 # ============================================================
 
-async def ban_command(update, context):
-    if not await is_admin(update, context):
+async def ban_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2345,7 +2712,11 @@ async def ban_command(update, context):
         )
         return
 
-    target = update.message.reply_to_message.from_user
+    target = (
+        update.message
+        .reply_to_message
+        .from_user
+    )
 
     try:
         await context.bot.ban_chat_member(
@@ -2358,10 +2729,31 @@ async def ban_command(update, context):
             .table("blocked_users")
             .upsert(
                 {
-                    "chat_id": update.effective_chat.id,
-                    "user_id": target.id,
-                    "reason": "Manual ban",
-                    "blocked_by": update.effective_user.id,
+                    "chat_id":
+                        update.effective_chat.id,
+                    "user_id":
+                        target.id,
+                    "reason":
+                        "Manual ban",
+                    "blocked_by":
+                        update.effective_user.id,
+                },
+                on_conflict="chat_id,user_id"
+            )
+            .execute()
+        )
+
+        (
+            supabase
+            .table("members")
+            .upsert(
+                {
+                    "chat_id":
+                        update.effective_chat.id,
+                    "user_id":
+                        target.id,
+                    "is_banned":
+                        True,
                 },
                 on_conflict="chat_id,user_id"
             )
@@ -2386,7 +2778,8 @@ async def ban_command(update, context):
         )
 
         await update.message.reply_text(
-            f"🚫 تم حظر {get_user_display(target)}."
+            f"🚫 تم حظر "
+            f"{get_user_display(target)}."
         )
 
     except Exception as e:
@@ -2399,8 +2792,14 @@ async def ban_command(update, context):
 # /UNBAN
 # ============================================================
 
-async def unban_command(update, context):
-    if not await is_admin(update, context):
+async def unban_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2408,7 +2807,8 @@ async def unban_command(update, context):
 
     if not context.args:
         await update.message.reply_text(
-            "الاستخدام:\n/unban USER_ID"
+            "الاستخدام:\n"
+            "/unban USER_ID"
         )
         return
 
@@ -2437,8 +2837,26 @@ async def unban_command(update, context):
             .execute()
         )
 
+        (
+            supabase
+            .table("members")
+            .update({
+                "is_banned": False
+            })
+            .eq(
+                "chat_id",
+                update.effective_chat.id
+            )
+            .eq(
+                "user_id",
+                user_id
+            )
+            .execute()
+        )
+
         await update.message.reply_text(
-            f"✅ تم إلغاء حظر المستخدم {user_id}."
+            f"✅ تم إلغاء حظر "
+            f"المستخدم {user_id}."
         )
 
     except Exception as e:
@@ -2451,8 +2869,14 @@ async def unban_command(update, context):
 # /RESETWARNINGS
 # ============================================================
 
-async def resetwarnings_command(update, context):
-    if not await is_admin(update, context):
+async def resetwarnings_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2465,7 +2889,8 @@ async def resetwarnings_command(update, context):
         return
 
     target = (
-        update.message.reply_to_message
+        update.message
+        .reply_to_message
         .from_user
     )
 
@@ -2473,11 +2898,9 @@ async def resetwarnings_command(update, context):
         (
             supabase
             .table("members")
-            .update(
-                {
-                    "warnings": 0
-                }
-            )
+            .update({
+                "warnings": 0
+            })
             .eq(
                 "chat_id",
                 update.effective_chat.id
@@ -2490,7 +2913,8 @@ async def resetwarnings_command(update, context):
         )
 
         await update.message.reply_text(
-            f"✅ تم تصفير تحذيرات {get_user_display(target)}."
+            f"✅ تم تصفير تحذيرات "
+            f"{get_user_display(target)}."
         )
 
     except Exception as e:
@@ -2503,8 +2927,14 @@ async def resetwarnings_command(update, context):
 # /UNMUTE
 # ============================================================
 
-async def unmute_command(update, context):
-    if not await is_admin(update, context):
+async def unmute_command(
+    update,
+    context
+):
+    if not await is_admin(
+        update,
+        context
+    ):
         await update.message.reply_text(
             "⛔ للمشرفين فقط."
         )
@@ -2517,7 +2947,8 @@ async def unmute_command(update, context):
         return
 
     target = (
-        update.message.reply_to_message
+        update.message
+        .reply_to_message
         .from_user
     )
 
@@ -2531,11 +2962,9 @@ async def unmute_command(update, context):
         (
             supabase
             .table("members")
-            .update(
-                {
-                    "is_muted": False
-                }
-            )
+            .update({
+                "is_muted": False
+            })
             .eq(
                 "chat_id",
                 update.effective_chat.id
@@ -2548,7 +2977,8 @@ async def unmute_command(update, context):
         )
 
         await update.message.reply_text(
-            f"🔊 تم فك تقييد {get_user_display(target)}."
+            f"🔊 تم فك تقييد "
+            f"{get_user_display(target)}."
         )
 
     except Exception as e:
@@ -2561,7 +2991,10 @@ async def unmute_command(update, context):
 # ERROR HANDLER
 # ============================================================
 
-async def error_handler(update, context):
+async def error_handler(
+    update,
+    context
+):
     logger.exception(
         "Unhandled exception: %s",
         context.error,
@@ -2584,9 +3017,9 @@ def main():
         .build()
     )
 
-    # --------------------------------------------------------
-    # Commands
-    # --------------------------------------------------------
+    # ========================================================
+    # COMMANDS
+    # ========================================================
 
     application.add_handler(
         CommandHandler(
@@ -2665,9 +3098,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
-    # New members
-    # --------------------------------------------------------
+    # ========================================================
+    # NEW MEMBERS
+    # ========================================================
 
     application.add_handler(
         ChatMemberHandler(
@@ -2676,9 +3109,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
-    # Terms
-    # --------------------------------------------------------
+    # ========================================================
+    # TERMS
+    # ========================================================
 
     application.add_handler(
         CallbackQueryHandler(
@@ -2687,9 +3120,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
-    # Admin Panel
-    # --------------------------------------------------------
+    # ========================================================
+    # ADMIN PANEL
+    # ========================================================
 
     application.add_handler(
         CallbackQueryHandler(
@@ -2698,9 +3131,9 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
-    # Moderation
-    # --------------------------------------------------------
+    # ========================================================
+    # MODERATION
+    # ========================================================
 
     application.add_handler(
         MessageHandler(
@@ -2709,17 +3142,17 @@ def main():
         )
     )
 
-    # --------------------------------------------------------
-    # Errors
-    # --------------------------------------------------------
+    # ========================================================
+    # ERRORS
+    # ========================================================
 
     application.add_error_handler(
         error_handler
     )
 
-    # --------------------------------------------------------
-    # Webhook
-    # --------------------------------------------------------
+    # ========================================================
+    # WEBHOOK
+    # ========================================================
 
     webhook_url = (
         f"{RENDER_URL.rstrip('/')}/"
@@ -2740,6 +3173,10 @@ def main():
         drop_pending_updates=True,
     )
 
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
     main()
